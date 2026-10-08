@@ -4,10 +4,22 @@
 > just started). Add new items if scope shifts.
 
 ## What works
-- **Frontend Scaffolding**: Next.js 16 + TypeScript + Tailwind CSS + shadcn/ui + Lucide icons. Production build verified with 0 errors.
+- **Frontend Scaffolding**: Next.js 16 + TypeScript + Tailwind CSS + shadcn/ui + Lucide icons. Production build verified with 0 errors across 11 routes.
 - **Landing Page** (`/`): Modern, high-converting hero, stats, 3 core feature pillars, 4-step workflow, resume report preview, interactive FAQ, responsive navigation & footer.
-- **Auth Flow** (`/login`, `/signup`): Authentication pages with candidate/expert role selection and guest/demo flow.
-- **Candidate Profile** (`/profile`): Personal info, target role, experience level, target companies, key skill chips, recent reports sidebar, interview cards.
+- **End-to-End Auth & RBAC Flow**:
+  - 3 Roles: `candidate`, `expert`, `admin`.
+  - Supabase Auth + Local Dev Dual-Mode: verifies live Supabase JWTs with `SUPABASE_JWT_SECRET` when present; provides zero-config local dev tokens for fast offline iteration.
+  - Role-protected endpoints via FastAPI dependencies: `get_current_user`, `require_candidate`, `require_expert`, `require_admin`.
+  - Standard `{ "data": ..., "error": null }` response shape enforced for all 401, 403, and 422 errors.
+  - Frontend `AuthProvider` & `useAuth` hook: session persistence in localStorage, Supabase integration, 1-click demo role switcher.
+  - Automatic `Authorization: Bearer <token>` injection on all frontend API requests (`apiGet`, `apiPost`, `apiPut`, `apiUpload`).
+  - Interactive Login (`/login`) with 1-click candidate, expert, and admin logins.
+  - Interactive Signup (`/signup`) with candidate vs expert role selection.
+  - Role-based route guard (`components/auth/ProtectedRoute.tsx`) with access restricted alerts and quick role switches.
+  - Navbar (`components/Navbar.tsx`) with dynamic role badges, active role indicators, and instant role switcher dropdown.
+  - Admin Console (`/admin`): live user directory, instant role change actions, and expert application approval.
+  - Expert Mentorship Hub (`/expert`): credentials management, domain specialties, bio, and verification status.
+- **Candidate Profile** (`/profile`): Connected to `useAuth` and backend candidate profile API with personal info, target role, experience level, target companies, and skill chips.
 - **Resume Upload & Scanner** (`/resume`): Drag-and-drop PDF upload, target role specification, 4-step animated scanning progression, connected to backend `apiUpload` with client-side fallback.
 - **Resume Diagnostic Report** (`/resume/report`): Executive summary, letter grade, radial overall score gauge (0-100), 4-pillar score breakdown (Impact, Technical Depth, ATS Compatibility, Structure & Brevity), detected skills grouped by category, strengths vs areas for improvement, actionable before/after bullet improvement cards with priority badges, and bridge CTA to start mock interview.
 - **Backend Core**: FastAPI layered architecture (`api/`, `services/`, `models/`, `schemas/`, `core/`), standard `{ data, error }` response schema, CORS middleware, health check endpoint.
@@ -25,43 +37,38 @@
 - [x] Backend: AI resume analysis (Gemini/Groq/mock)
 - [x] Resume diagnostic report page
 - [x] Backend & frontend scaffolding
-- [ ] Connect Supabase Auth live project credentials
-- [ ] Connect Postgres database via Alembic migration
+- [x] Auth with 3 roles (candidate, expert, admin)
+- [x] Role-Based Access Control (RBAC) in FastAPI
+- [x] Protected routes & Role-based UI in Next.js
+- [x] Admin approval flow for expert applications
+- [ ] Connect Supabase Auth live project credentials (when keys provided)
+- [ ] Connect Postgres database via Alembic migration (when DB URL provided)
 
-### Auth & users
-- [ ] Supabase Auth wired into Next.js (signup/login/logout)
-- [ ] Role selection (candidate/expert) on signup
-- [ ] Admin approval flow for expert applications
-
-### Expert discovery
-- [ ] Expert profile creation form
-- [ ] Expert browse/filter page (by domain)
-
-### Booking & availability
-- [ ] Expert availability calendar (set weekly slots)
-- [ ] Candidate booking flow (pick slot, confirm)
-- [ ] Booking confirmation email
-
-### Video sessions
-- [ ] Jitsi room creation per booking
-- [ ] Join-call UI for both candidate and expert
-
-### AI interviewer
+### Phase 2: AI mock interview
 - [ ] Domain/role selection UI for "Practice now"
 - [ ] Resume upload + Gemini-based parsing
 - [ ] Adaptive question/follow-up loop
 - [ ] AI-generated feedback report
 
-### Feedback & dashboards
+### Phase 3: Expert discovery & booking
+- [ ] Expert profile creation form
+- [ ] Expert browse/filter page (by domain)
+- [ ] Expert availability calendar (set weekly slots)
+- [ ] Candidate booking flow (pick slot, confirm)
+- [ ] Booking confirmation email
+
+### Phase 4: Video sessions & expert feedback
+- [ ] Jitsi room creation per booking
+- [ ] Join-call UI for both candidate and expert
 - [ ] Structured feedback form for experts
 - [ ] Feedback report view (shared component for AI + expert feedback)
+
+### Phase 5: Dashboards & Notifications
 - [ ] Candidate dashboard (session history + trend)
 - [ ] Expert dashboard (bookings + ratings)
-
-### Notifications
 - [ ] Email on booking confirmed
 - [ ] Email/in-app reminder before session
 - [ ] Email/in-app alert when feedback is ready
 
 ## Known issues
-- None yet — nothing built.
+- None — all 11 frontend routes compile cleanly and all 10 backend auth & RBAC verification tests pass.

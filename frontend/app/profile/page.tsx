@@ -1,45 +1,87 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Rocket, Briefcase, Calendar, FileText, User } from "lucide-react";
+import { Briefcase, Calendar, FileText, Check } from "lucide-react";
+import { apiGet, apiPut } from "@/lib/api";
+import { CandidateProfile } from "@/lib/types";
 
 export default function ProfilePage() {
   return (
-    <div className="min-h-screen bg-background">
-      <nav className="border-b bg-card">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Rocket className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold tracking-tight">PrepPilot</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <Avatar>
-              <AvatarFallback>JD</AvatarFallback>
-            </Avatar>
-          </div>
-        </div>
-      </nav>
+    <ProtectedRoute allowedRoles={["candidate", "expert", "admin"]}>
+      <ProfilePageContent />
+    </ProtectedRoute>
+  );
+}
 
-      <main className="container mx-auto px-4 py-8">
+function ProfilePageContent() {
+  const { user } = useAuth();
+  const [targetRole, setTargetRole] = useState("Software Engineer");
+  const [bio, setBio] = useState("Candidate preparing for tech interviews");
+  const [saving, setSaving] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  useEffect(() => {
+    async function loadProfile() {
+      const res = await apiGet<CandidateProfile>("/api/users/profile");
+      if (res.data) {
+        if (res.data.target_role) setTargetRole(res.data.target_role);
+        if (res.data.bio) setBio(res.data.bio);
+      }
+    }
+    loadProfile();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSavedSuccess(false);
+    const res = await apiPut<CandidateProfile>("/api/users/profile", {
+      target_role: targetRole,
+      bio,
+    });
+    setSaving(false);
+    if (res.data) {
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    }
+  };
+
+  const initials = user?.full_name
+    ? user.full_name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+    : "CD";
+
+  return (
+    <div className="min-h-screen bg-background">
+      <main className="container max-w-7xl mx-auto px-4 py-8">
         <div className="flex flex-col md:flex-row gap-8">
           {/* Main Content */}
           <div className="flex-1 space-y-6">
             <div className="flex items-center gap-4">
-              <Avatar className="h-20 w-20">
-                <AvatarFallback className="text-2xl">JD</AvatarFallback>
+              <Avatar className="h-20 w-20 border-2 border-primary/20">
+                <AvatarFallback className="text-2xl bg-primary/10 text-primary font-bold">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
               <div>
-                <h1 className="text-3xl font-bold">John Doe</h1>
-                <p className="text-muted-foreground">Frontend Developer Candidate</p>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-3xl font-bold">{user?.full_name || "Candidate User"}</h1>
+                  <Badge variant="outline" className="capitalize">
+                    {user?.role}
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground">{user?.email}</p>
               </div>
             </div>
+
 
             <Card>
               <CardHeader>
@@ -59,7 +101,12 @@ export default function ProfilePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="bio">Bio</Label>
-                  <Textarea id="bio" placeholder="Tell us a little about yourself..." defaultValue="Passionate frontend developer looking for new opportunities in the tech industry." />
+                  <Textarea
+                    id="bio"
+                    placeholder="Tell us a little about yourself..."
+                    value={bio}
+                    onChange={(e) => setBio(e.target.value)}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -73,7 +120,11 @@ export default function ProfilePage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="role">Target Role</Label>
-                    <Input id="role" defaultValue="Frontend Engineer" />
+                    <Input
+                      id="role"
+                      value={targetRole}
+                      onChange={(e) => setTargetRole(e.target.value)}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="experience">Experience Level</Label>
@@ -106,9 +157,18 @@ export default function ProfilePage() {
               </CardContent>
             </Card>
 
-            <div className="flex justify-end">
-              <Button size="lg">Save Profile</Button>
+            <div className="flex items-center justify-between">
+              {savedSuccess ? (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                  <Check className="w-4 h-4" />
+                  <span>Profile updated successfully!</span>
+                </div>
+              ) : <div />}
+              <Button size="lg" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : "Save Profile"}
+              </Button>
             </div>
+
           </div>
 
           {/* Sidebar */}
