@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api import resume, auth, users
+from app.api import resume, auth, users, bookings
 
 app = FastAPI(title="PrepPilot API")
 
@@ -16,6 +16,7 @@ app.add_middleware(
 app.include_router(resume.router, prefix="/api/resume", tags=["resume"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
+app.include_router(bookings.router, prefix="/api", tags=["booking"])
 
 @app.get("/api/health")
 async def health_check():

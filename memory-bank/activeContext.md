@@ -19,6 +19,8 @@ Building end-to-end resume analysis flow (landing page → auth → profile → 
 - Payments explicitly out of scope for MVP — using a credits system instead of real money.
 
 ## Recent accomplishments
+- Booking and availability module added on `booking/expert-availability-flow`: expert discovery API,
+  future availability slots, atomic slot reservation, booking records, Alembic migration, and `/booking` UI.
 - Phase 1 End-to-End Candidate flow built and tested:
   - High-converting Landing page (`/`)
   - Login & Signup pages (`/login`, `/signup`)
@@ -31,6 +33,8 @@ Building end-to-end resume analysis flow (landing page → auth → profile → 
 ## Next steps
 1. User provides or connects Supabase keys (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`) and AI keys (`GEMINI_API_KEY`, `GROQ_API_KEY`) when ready.
 2. Advance to Phase 2: AI Mock Interview module (adaptive question generation based on resume gaps, speech/text response handling, and live feedback scoring).
+3. Apply the booking migration after the shared Postgres/Supabase database is configured, then connect the
+   authenticated user id to the booking endpoints instead of the temporary development query parameter.
 
 ## Open questions (resolve before Phase 1 ends)
 - Exact scoring rubric for feedback (what does a "technical_score" of 7/10 mean, concretely?) — needs a

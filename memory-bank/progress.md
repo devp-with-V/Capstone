@@ -38,8 +38,8 @@
 - [ ] Expert browse/filter page (by domain)
 
 ### Booking & availability
-- [ ] Expert availability calendar (set weekly slots)
-- [ ] Candidate booking flow (pick slot, confirm)
+- [x] Expert availability calendar (set weekly slots)
+- [x] Candidate booking flow (pick slot, confirm)
 - [ ] Booking confirmation email
 
 ### Video sessions
