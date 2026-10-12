@@ -3,7 +3,7 @@
 > Single source of truth for current project status, recent changes, and upcoming tasks.
 
 ## Current State
-- **Branch**: `dev`
+- **Branch**: `candidate/profile-dashboard` (branched from `dev`)
 - **Database**: Live Supabase PostgreSQL pool (`postgresql+asyncpg://`)
 - **Backend**: FastAPI on port 8000 with JWT auth, password hashing, and Alembic migrations
 - **Frontend**: Next.js 16.3 (App Router) on port 3000 with Obsidian Gloss theme
@@ -34,12 +34,22 @@
    - Integrated shared Navbar links for Book Mentor, AI Mock, and Feedback.
    - Built and routed all missing microservice pages: `/jd-analyzer`, `/report`, `/jobs`, `/teams`.
    - Wired `/mentors` booking modal to call `POST /api/bookings` and route to live `/video` session.
-   - Tested full production build (`npm run build`): all 18 routes compile with 0 errors.
+   - Tested full production build (`npm run build`): all routes compile with 0 errors.
+
+## Candidate Dashboard Feature (Teammate 3 - Akshita)
+- **File**: `frontend/app/profile/page.tsx`
+- **Accomplishments**:
+  - Implemented candidate active & upcoming bookings display using `apiGet('/api/bookings')` with status pills, time slot formatting, and direct Jitsi video room join CTA (`/video?room=...`).
+  - Implemented structured past feedback reports display with 3-pillar rubric scores (Communication, Technical Depth, Problem Solving), evaluator summary notes, key strengths, targeted improvements, and direct links to `/feedback`.
+  - Added an interactive in-dashboard quick rubric inspector modal for immediate feedback review without page switching.
+  - Bound authenticated user identity dynamically from `useAuth()` (full name and verified email address).
+  - Built interactive interview goals & skills tag manager (add/remove skills, target companies, experience level) with `apiPut('/api/users/profile')` persistence.
+  - Verified Next.js build passes with 0 errors across all routes.
 
 ## Next Tasks & Team Delegation
 1. Add production OpenRouter API key to `backend/.env`.
 2. Team assignments:
-   - **Teammate 1 (Interviews & Questions)**: Expand questions bank & interview rubric export.
-   - **Teammate 2 (Video & Whiteboard)**: Test and polish multi-user Jitsi room controls.
-   - **Teammate 3 (Candidate Dashboard)**: Build candidate bookings history tab in `/profile`.
-   - **Teammate 4 (Expert Management)**: Enhance `/expert` dashboard with slot availability calendar.
+   - **Teammate 1 (Interviews & Questions)**: Expand questions bank & interview rubric export (`frontend/app/mock-interview/page.tsx`, `backend/app/api/ai.py`).
+   - **Teammate 2 (Video & Whiteboard)**: Jitsi room query auto-join & in-call scratchpad (`frontend/app/video/page.tsx`).
+   - **Teammate 3 (Akshita - Candidate Dashboard)**: Completed! Active bookings, feedback reports, and profile identity in `/profile`.
+   - **Teammate 4 (Expert Management)**: Enhance `/expert` dashboard with slot availability calendar (`frontend/app/expert/page.tsx`, `backend/app/api/bookings.py`).

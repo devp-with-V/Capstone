@@ -34,6 +34,13 @@
 - [x] Normalized feedback calculation supporting 1-5 and 0-100 scales with strengths and improvements
 - [x] Seeded demo session `demo-session-002` viewable on `/feedback`
 
+### Candidate Dashboard (Teammate 3 - Akshita)
+- [x] In `/profile`, display the candidate's active bookings (`GET /api/bookings`) with status pills, dates, and direct `/video?room=...` join call button.
+- [x] Display past interview feedback reports with 3-pillar breakdown scores, evaluator notes, and direct links to `/feedback`.
+- [x] Built interactive quick rubric summary modal in the dashboard.
+- [x] Display candidate's real authenticated identity (name, email) from `useAuth()`.
+- [x] Candidate interview goals, experience level, target companies, and interactive skills tag chip manager with `apiPut('/api/users/profile')` persistence.
+
 ### Pages & Routing (0 Broken Links / 0 404s)
 - [x] `/` (Landing Page with Login / Signup header and active CTAs)
 - [x] `/login` & `/signup`
@@ -42,7 +49,7 @@
 - [x] `/mentors` & `/booking`
 - [x] `/feedback`
 - [x] `/video`
-- [x] `/profile`
+- [x] `/profile` (Candidate Dashboard: Bookings, Reports, Goals)
 - [x] `/expert`
 - [x] `/admin`
 - [x] `/jd-analyzer`
@@ -63,8 +70,9 @@
 - [ ] Add a side-by-side collaborative code/notes pane next to the Jitsi meeting iframe.
 
 ### Teammate 3: Candidate Dashboard & Past Sessions
-- [ ] In `/profile`, display the candidate's active bookings (`GET /api/bookings`).
-- [ ] Add a list of past interview feedback reports with direct links to view them.
+- [x] In `/profile`, display the candidate's active bookings (`GET /api/bookings`).
+- [x] Add a list of past interview feedback reports with direct links to view them.
+- [x] Display candidate authenticated name & email from `useAuth()`.
 
 ### Teammate 4: Expert Dashboard & Slot Manager
 - [ ] In `/expert`, allow experts to add/remove availability slots (`POST /api/experts/{id}/slots`).
