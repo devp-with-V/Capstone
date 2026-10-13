@@ -29,6 +29,23 @@ class BookingService:
         await db.commit()
         await db.refresh(slot)
         return slot
+            async def delete_slot(self, db: AsyncSession, expert_id: str, slot_id: str) -> bool:
+        slot = await db.scalar(
+            select(AvailabilitySlot).where(
+                AvailabilitySlot.id == slot_id,
+                AvailabilitySlot.expert_id == expert_id,
+            )
+        )
+
+        if not slot:
+            raise ValueError("Availability slot not found.")
+
+        if slot.is_booked:
+            raise ValueError("A booked slot cannot be removed.")
+
+        await db.delete(slot)
+        await db.commit()
+        return True
 
     async def book_slot(self, db: AsyncSession, candidate_id: str, slot_id: str, agenda: str | None) -> Booking:
         # The row lock makes a double-click or two simultaneous requests deterministic: one succeeds.
