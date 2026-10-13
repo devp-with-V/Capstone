@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/lib/auth-context";
 import { ExpertProfile } from "@/lib/types";
-import { apiGet, apiPut } from "@/lib/api";
+import { apiGet, apiPost, apiPut } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,13 @@ export default function ExpertPage() {
 
 function ExpertDashboardContent() {
   const { user } = useAuth();
+  const [expertId, setExpertId] = useState("");
+const [slots, setSlots] = useState<any[]>([]);
+const [slotDate, setSlotDate] = useState("");
+const [startTime, setStartTime] = useState("09:00");
+const [endTime, setEndTime] = useState("09:30");
+const [slotMessage, setSlotMessage] = useState("");
+const [slotLoading, setSlotLoading] = useState(false);
   const [profile, setProfile] = useState<ExpertProfile | null>(null);
   const [companyTitle, setCompanyTitle] = useState("");
   const [domains, setDomains] = useState("");
@@ -28,10 +35,85 @@ function ExpertDashboardContent() {
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [loading, setLoading] = useState(true);
+    const handleAddSlot = async () => {
+    if (!expertId || !slotDate) {
+      setSlotMessage("Please select a date first.");
+      return;
+    }
+
+    const start = new Date(`${slotDate}T${startTime}:00`);
+    const end = new Date(`${slotDate}T${endTime}:00`);
+
+    if (end <= start) {
+      setSlotMessage("End time must be later than start time.");
+      return;
+    }
+
+    setSlotLoading(true);
+    setSlotMessage("");
+
+    const result = await apiPost(
+      `/api/experts/${expertId}/slots`,
+      {
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+      }
+    );
+
+    if (result.error) {
+      setSlotMessage(result.error);
+    } else {
+      setSlotMessage("Availability slot added successfully.");
+      await loadSlots(expertId);
+    }
+
+    setSlotLoading(false);
+  };
+    const loadSlots = async (id: string) => {
+    const result = await apiGet<any[]>(`/api/experts/${id}/slots`);
+
+    if (result.data) {
+      setSlots(result.data);
+    }
+  };
+    const handleRemoveSlot = async (slotId: string) => {
+    if (!expertId) return;
+
+    setSlotLoading(true);
+    setSlotMessage("");
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/experts/${expertId}/slots/${slotId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+        },
+      }
+    );
+
+    if (response.ok) {
+      setSlotMessage("Availability slot removed successfully.");
+      await loadSlots(expertId);
+    } else {
+      const error = await response.json().catch(() => null);
+      setSlotMessage(error?.detail || "Failed to remove the slot.");
+    }
+
+    setSlotLoading(false);
+  };
 
   useEffect(() => {
     async function loadExpertProfile() {
       setLoading(true);
+      const expertRes = await apiGet<{ id: string }>("/api/experts/me");
+
+if (expertRes.data) {
+  setExpertId(expertRes.data.id);
+}
+      if (expertRes.data) {
+        await loadSlots(expertRes.data.id);
+      }
       const res = await apiGet<ExpertProfile>("/api/users/expert/profile");
       if (res.data) {
         setProfile(res.data);
@@ -187,6 +269,106 @@ function ExpertDashboardContent() {
             </Button>
           </CardFooter>
         </form>
+            </Card>
+
+      {/* Expert Availability Slots */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Manage Availability</CardTitle>
+          <CardDescription>
+            Add time slots when candidates can book sessions with you.
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="slot-date">Date</Label>
+              <Input
+                id="slot-date"
+                type="date"
+                value={slotDate}
+                onChange={(e) => setSlotDate(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="slot-start">Start Time</Label>
+              <Input
+                id="slot-start"
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="slot-end">End Time</Label>
+              <Input
+                id="slot-end"
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            disabled={slotLoading || !expertId || !slotDate}
+            onClick={handleAddSlot}
+          >
+            {slotLoading ? "Adding Slot..." : "Add Availability Slot"}
+          </Button>
+
+          {slotMessage && (
+            <p className="text-sm text-muted-foreground">{slotMessage}</p>
+          )}
+
+          <div className="border-t pt-4 space-y-3">
+            <h3 className="font-semibold">Your Upcoming Slots</h3>
+
+            {slots.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No upcoming availability slots found.
+              </p>
+            ) : (
+              slots.map((slot) => (
+                <div
+                  key={slot.id}
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border p-3"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {new Date(slot.start_time).toLocaleDateString()}{" "}
+                      {new Date(slot.start_time).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      {" – "}
+                      {new Date(slot.end_time).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {slot.is_booked ? "Booked" : "Available"}
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={slot.is_booked || slotLoading}
+                    onClick={() => handleRemoveSlot(slot.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
       </Card>
     </div>
   );
