@@ -55,8 +55,9 @@
 ## Remaining Work (Team Delegation Plan)
 
 ### Teammate 1: AI Mock Interview Polish & Rubric Export
-- [ ] Save full interview conversation transcripts to the database.
-- [ ] Implement an automated "End Interview & Generate Rubric" action in `/mock-interview` that posts to `/api/feedback`.
+- [x] Save completed interview conversation transcripts in PostgreSQL through the existing feedback record's `comments` field.
+- [x] Implement an automated "End Interview & Generate Rubric" action in `/mock-interview` that posts to `/api/feedback` and opens the matching report.
+- [x] Average STAR and three rubric dimensions across actual candidate answers; exclude scratchpad messages from scoring.
 
 ### Teammate 2: Video Interview Experience (Jitsi)
 - [ ] Connect the meeting room link from the booking confirmation directly to the `/video` page route with room query param.

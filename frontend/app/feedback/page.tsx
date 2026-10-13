@@ -49,11 +49,11 @@ export default function FeedbackPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const loadReport = async () => {
+  const loadReport = async (requestedId = sessionId) => {
     setError("");
     setReport(null);
 
-    if (!sessionId.trim()) {
+    if (!requestedId.trim()) {
       setError("Please enter an interview session ID.");
       return;
     }
@@ -61,7 +61,7 @@ export default function FeedbackPage() {
     setLoading(true);
 
     const result = await apiGet<FeedbackReport>(
-      `/api/feedback/${sessionId.trim()}`
+      `/api/feedback/${encodeURIComponent(requestedId.trim())}`
     );
 
     if (result.error) {
@@ -81,7 +81,9 @@ export default function FeedbackPage() {
   };
 
   useEffect(() => {
-    loadReport();
+    const requestedId = new URLSearchParams(window.location.search).get("session")?.trim();
+    if (requestedId) setSessionId(requestedId);
+    void loadReport(requestedId || undefined);
   }, []);
 
   return (
@@ -149,7 +151,7 @@ export default function FeedbackPage() {
                 className="bg-background"
               />
 
-              <Button onClick={loadReport} disabled={loading}>
+              <Button onClick={() => void loadReport()} disabled={loading}>
                 {loading ? "Loading..." : "View Report"}
               </Button>
             </div>
@@ -366,7 +368,7 @@ export default function FeedbackPage() {
                 </CardHeader>
 
                 <CardContent>
-                  <p className="text-sm leading-6 text-muted-foreground">
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
                     {report.comments}
                   </p>
                 </CardContent>

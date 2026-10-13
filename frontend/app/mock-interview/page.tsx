@@ -15,11 +15,20 @@ interface DialogueMessage {
   isBlueprint?: boolean;
 }
 
+interface InterviewRubric {
+  communication_score: number;
+  technical_score: number;
+  problem_solving_score: number;
+  star_score: number;
+  summary: string;
+  scoring_method: string;
+}
+
 export default function MockInterviewPage() {
   const router = useRouter();
 
   // Elapsed Timer state
-  const [elapsedSeconds, setElapsedSeconds] = useState(24 * 60 + 18);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
@@ -37,7 +46,9 @@ export default function MockInterviewPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [showWhiteboard, setShowWhiteboard] = useState(false);
-  const [showFinishModal, setShowFinishModal] = useState(false);
+  const [isReplying, setIsReplying] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  const [interviewError, setInterviewError] = useState("");
 
   // Scratchpad diagram text
   const [scratchpadText, setScratchpadText] = useState(`[Client API Gateway] --> [Partition Key Dispatcher / Dynamic Salting]
@@ -56,18 +67,9 @@ export default function MockInterviewPage() {
       id: "msg-1",
       sender: "ai",
       senderName: "AI Proctor (AURA)",
-      timestamp: "23:50",
+      timestamp: "00:00",
       content:
-        '“You suggested hashing by user_id to distribute incoming ledger journal transfers across your 64 Kafka partitions. Suppose one customer is Amazon or Shopify during Cyber Monday, bursting over 50,000 tx/sec onto that single key. How do you mitigate severe partition skew and the resulting consumer group lag without losing strict per-account event ordering?”',
-    },
-    {
-      id: "msg-2",
-      sender: "candidate",
-      senderName: "You (Candidate)",
-      timestamp: "24:12",
-      content:
-        '“To tackle hot partitions for giant VIP tenants, I\'d introduce dynamic salt sub-key partitioning combined with a composite ledger batcher. Instead of pure user_id, high-volume accounts get an ephemeral suffix—like user_id#hash(time_bucket_100ms)—distributing the write payload across an isolated sub-cluster of worker nodes. On the settlement side...”',
-      isStreaming: true,
+        "Tell me about a distributed system you designed. What were its constraints, the decisions you made, and the result?",
     },
   ]);
 
@@ -89,7 +91,9 @@ export default function MockInterviewPage() {
 
   // Send candidate message
   const handleSendAnswer = async () => {
-    if (!inputAnswer.trim()) return;
+    if (!inputAnswer.trim() || isReplying || isEnding) return;
+    setInterviewError("");
+    setIsReplying(true);
     const answerText = inputAnswer.trim();
     const candidateMsg: DialogueMessage = {
       id: `msg-${Date.now()}`,
@@ -125,9 +129,11 @@ export default function MockInterviewPage() {
         target_role: "Staff Distributed Systems Engineer",
       });
 
-      const replyContent =
-        res.data?.reply ||
-        "“Good architectural breakdown. How would you handle continuous ledger compaction while maintaining sub-millisecond read latency on historical balances?”";
+      if (res.error || !res.data?.reply) {
+        throw new Error(res.error || "The interviewer could not respond. Please try again.");
+      }
+
+      const replyContent = res.data.reply;
 
       setMessages((prev) =>
         prev
@@ -140,20 +146,58 @@ export default function MockInterviewPage() {
             content: `“${replyContent.replace(/^[“"]|[”"]$/g, "")}”`,
           })
       );
-    } catch {
-      // Fallback response if network or AI service drops
-      setMessages((prev) =>
-        prev
-          .filter((m) => m.id !== thinkingMsgId)
-          .concat({
-            id: `msg-ai-${Date.now()}`,
-            sender: "ai",
-            senderName: "AI Proctor (AURA)",
-            timestamp: formatTimer(elapsedSeconds + 3),
-            content:
-              "“Excellent insight on time-bucketed dynamic salting. How would you handle state reconciliation during node failover when sequence numbers must remain strictly monotonic across replicas?”",
-          })
-      );
+    } catch (error) {
+      setMessages((prev) => prev.filter((m) => m.id !== thinkingMsgId));
+      setInterviewError(error instanceof Error ? error.message : "Could not get an interviewer response.");
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
+  const handleEndInterview = async () => {
+    if (isEnding || isReplying) return;
+    const transcript = messages.filter((message) => !message.id.startsWith("thinking-"));
+    if (!transcript.some((message) => message.sender === "candidate" && !message.isBlueprint)) {
+      setInterviewError("Answer at least one question before ending the interview.");
+      return;
+    }
+
+    setIsEnding(true);
+    setInterviewError("");
+    try {
+      const rubricResult = await apiPost<InterviewRubric>("/api/ai/interview/rubric", {
+        messages: transcript.map((message) => ({
+          sender: message.sender,
+          sender_name: message.senderName,
+          content: message.content,
+          is_blueprint: Boolean(message.isBlueprint),
+        })),
+        target_role: "Staff Distributed Systems Engineer",
+      });
+      if (rubricResult.error || !rubricResult.data) {
+        throw new Error(rubricResult.error || "Could not generate the interview rubric.");
+      }
+
+      const rubric = rubricResult.data;
+      const sessionId = crypto.randomUUID();
+      const fullTranscript = transcript
+        .map((message) => `${message.sender === "ai" ? "AURA" : "Candidate"} (${message.timestamp}): ${message.content}`)
+        .join("\n\n");
+      const feedbackResult = await apiPost<{ session_id: string }>("/api/feedback", {
+        session_id: sessionId,
+        communication_score: rubric.communication_score,
+        technical_score: rubric.technical_score,
+        problem_solving_score: rubric.problem_solving_score,
+        authored_by: "ai",
+        comments: `${rubric.summary}\nSTAR average: ${rubric.star_score}/5. Scoring: ${rubric.scoring_method}.\n\nInterview transcript:\n${fullTranscript}`,
+      });
+      if (feedbackResult.error || !feedbackResult.data?.session_id) {
+        throw new Error(feedbackResult.error || "Could not save the interview feedback.");
+      }
+      router.push(`/feedback?session=${encodeURIComponent(sessionId)}`);
+    } catch (error) {
+      setInterviewError(error instanceof Error ? error.message : "Could not finish the interview.");
+      setIsEnding(false);
     }
   };
 
@@ -277,14 +321,21 @@ export default function MockInterviewPage() {
                 </div>
               </div>
               <button
-                onClick={() => setShowFinishModal(true)}
+                onClick={handleEndInterview}
+                disabled={isEnding || isReplying}
                 className="px-4 py-2 rounded-xl bg-surface-container-high hover:bg-error hover:text-white text-error transition-all duration-200 text-xs font-semibold flex items-center gap-1.5 border border-error/30 shadow-sm"
               >
                 <span className="material-symbols-outlined text-[16px]">call_end</span>
-                Finish Round
+                {isEnding ? "Generating rubric..." : "End Interview"}
               </button>
             </div>
           </div>
+
+          {interviewError && (
+            <div role="alert" className="rounded-xl border border-error/30 bg-error-container/30 px-4 py-3 text-sm text-error">
+              {interviewError}
+            </div>
+          )}
 
           {/* Grid: Main Left 8 Columns / Telemetry Right 4 Columns */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
@@ -420,7 +471,7 @@ export default function MockInterviewPage() {
                   />
                   <button
                     onClick={handleSendAnswer}
-                    disabled={!inputAnswer.trim()}
+                    disabled={!inputAnswer.trim() || isReplying || isEnding}
                     className="px-4 py-2.5 rounded-xl bg-primary-container text-white text-xs font-semibold hover:brightness-110 transition-all disabled:opacity-40 flex items-center gap-1"
                   >
                     <span className="material-symbols-outlined text-[16px]">send</span> Send
@@ -511,15 +562,15 @@ export default function MockInterviewPage() {
 
             {/* Right 4 Columns */}
             <div className="lg:col-span-4 flex flex-col gap-6">
-              {/* Live Rubric Telemetry Card */}
+              {/* Rubric is calculated from completed answers at the end. */}
               <div className="w-full bg-surface-container rounded-2xl p-6 border border-white/[0.08] shadow-lg flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="material-symbols-outlined text-tertiary text-[20px]">analytics</span>
-                    <h3 className="font-headline-sm text-base font-bold text-on-surface">Live Rubric Telemetry</h3>
+                    <h3 className="font-headline-sm text-base font-bold text-on-surface">Interview Rubric</h3>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full bg-tertiary-container/30 text-tertiary font-code-mono text-xs border border-tertiary/20">
-                    A-Tier Target
+                    Text answers
                   </span>
                 </div>
 
@@ -531,12 +582,9 @@ export default function MockInterviewPage() {
                         <span className="material-symbols-outlined text-primary text-[16px]">account_tree</span>
                         System Depth &amp; Trade-offs
                       </span>
-                      <span className="font-code-mono text-primary font-bold">94%</span>
+                      <span className="font-code-mono text-primary font-bold">Pending</span>
                     </div>
-                    <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden mt-1">
-                      <div className="bg-gradient-to-r from-primary-container to-primary h-full rounded-full w-[94%]" />
-                    </div>
-                    <span className="text-[11px] text-outline mt-0.5">High competence in data durability, idempotency tokens &amp; sharding.</span>
+                    <span className="text-[11px] text-outline mt-0.5">Evaluated from your completed answers.</span>
                   </div>
 
                   {/* Communication Clarity */}
@@ -546,12 +594,9 @@ export default function MockInterviewPage() {
                         <span className="material-symbols-outlined text-tertiary text-[16px]">record_voice_over</span>
                         Communication Clarity
                       </span>
-                      <span className="font-code-mono text-tertiary font-bold">88%</span>
+                      <span className="font-code-mono text-tertiary font-bold">Pending</span>
                     </div>
-                    <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden mt-1">
-                      <div className="bg-gradient-to-r from-tertiary-container to-tertiary h-full rounded-full w-[88%]" />
-                    </div>
-                    <span className="text-[11px] text-outline mt-0.5">Precise nomenclature, direct responses without hedging behavior.</span>
+                    <span className="text-[11px] text-outline mt-0.5">Speech delivery is not scored in this text interview.</span>
                   </div>
 
                   {/* STAR Framework */}
@@ -561,12 +606,9 @@ export default function MockInterviewPage() {
                         <span className="material-symbols-outlined text-secondary text-[16px]">stars</span>
                         STAR Framework Fidelity
                       </span>
-                      <span className="font-code-mono text-secondary font-bold">92%</span>
+                      <span className="font-code-mono text-secondary font-bold">Pending</span>
                     </div>
-                    <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden mt-1">
-                      <div className="bg-gradient-to-r from-secondary-container to-secondary h-full rounded-full w-[92%]" />
-                    </div>
-                    <span className="text-[11px] text-outline mt-0.5">Structured progression from hypothesis through execution metric proofs.</span>
+                    <span className="text-[11px] text-outline mt-0.5">Based on your answers when you end the interview.</span>
                   </div>
                 </div>
 
@@ -713,66 +755,6 @@ export default function MockInterviewPage() {
               >
                 <span className="material-symbols-outlined text-[16px]">podcasts</span>
                 Broadcast Diagram to Proctor
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FINISH ROUND SUMMARY MODAL */}
-      {showFinishModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-surface-container-low border border-white/[0.1] rounded-3xl max-w-lg w-full p-6 sm:p-8 flex flex-col gap-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-tertiary-container/30 text-tertiary flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px]">task_alt</span>
-                </div>
-                <h3 className="text-lg font-bold text-on-surface">Simulation Concluded</h3>
-              </div>
-              <button onClick={() => setShowFinishModal(false)} className="text-outline hover:text-on-surface">
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center text-center gap-2">
-              <span className="font-code-mono text-xs text-tertiary uppercase tracking-wider font-semibold">Staff Bar Met</span>
-              <div className="flex items-baseline gap-1">
-                <span className="text-5xl font-extrabold text-tertiary">91</span>
-                <span className="font-code-mono text-sm text-outline">/100</span>
-              </div>
-              <p className="text-xs text-on-surface-variant max-w-sm mt-1">
-                Outstanding grasp of distributed event streams and sharding tradeoffs. Minor improvement advised on partition tolerance rollbacks.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2.5 text-center font-code-mono text-xs">
-              <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
-                <span className="text-[10px] text-outline uppercase block">Depth</span>
-                <span className="text-primary font-bold text-sm">94%</span>
-              </div>
-              <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
-                <span className="text-[10px] text-outline uppercase block">Clarity</span>
-                <span className="text-tertiary font-bold text-sm">88%</span>
-              </div>
-              <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
-                <span className="text-[10px] text-outline uppercase block">STAR</span>
-                <span className="text-secondary font-bold text-sm">92%</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={() => setShowFinishModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-surface-container text-xs font-semibold text-on-surface-variant hover:text-on-surface border border-white/[0.08]"
-              >
-                Resume Round
-              </button>
-              <button
-                onClick={() => router.push("/report")}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-xs font-semibold text-white hover:brightness-110 shadow-md flex items-center justify-center gap-1"
-              >
-                View Full Report →
               </button>
             </div>
           </div>

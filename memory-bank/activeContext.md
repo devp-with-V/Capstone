@@ -37,6 +37,14 @@
    - Tested full production build (`npm run build`): all 18 routes compile with 0 errors.
 
 ## Next Tasks & Team Delegation
+### Payoshnee T1 update (2026-10-13)
+- On `ai/interview-transcript` (based on `dev`), the mock interview now starts without a fabricated candidate answer and has an **End Interview** action.
+- `POST /api/ai/interview/rubric` scores completed text answers on communication, technical depth, problem solving, and STAR; it averages per-answer scores. If configured AI providers are unavailable or return invalid JSON, a clearly labelled text heuristic is used.
+- Ending the interview posts scores and the full transcript into the existing PostgreSQL feedback record (`feedback.comments`) and opens `/feedback?session=<id>`; the feedback page loads that session automatically.
+- Restored the missing `frontend/lib/utils.ts` class-name helper and adjusted `.gitignore` so the file can be tracked. This fixes an existing `dev` build failure in login/signup.
+- Backend rubric tests and existing endpoint tests pass. Frontend production build passes. No database schema or auth middleware was changed.
+- Next: merge this PR into `dev`; the other teammate assignments below remain open.
+
 1. Add production OpenRouter API key to `backend/.env`.
 2. Team assignments:
    - **Teammate 1 (Interviews & Questions)**: Expand questions bank & interview rubric export.
