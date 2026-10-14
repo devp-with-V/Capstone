@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { JitsiMeeting } from "@jitsi/react-sdk";
+import { PageShell, ObsidianCard } from "@/components/layout/PageShell";
+import { useAuth } from "@/lib/auth-context";
+import { getAuthToken } from "@/lib/api";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000") + "/api";
 
@@ -14,10 +17,27 @@ type Session = {
   ended_at?: string | null;
 };
 
+function authHeaders(hasBody = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (hasBody) {
+    headers["Content-Type"] = "application/json";
+  }
+  const token = getAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export default function VideoPage() {
+  const { user } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const userId = user?.id ?? "";
+  const displayName = user?.full_name || "PrepPilot Candidate";
+  const email = user?.email || "candidate@preppilot.com";
 
   const createSession = async () => {
     try {
@@ -26,11 +46,9 @@ export default function VideoPage() {
 
       const response = await fetch(`${API_BASE_URL}/video/session`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: authHeaders(true),
         body: JSON.stringify({
-          user_id: "mock-user-123",
+          user_id: userId,
         }),
       });
 
@@ -59,6 +77,7 @@ export default function VideoPage() {
         `${API_BASE_URL}/video/session/${session.id}/join`,
         {
           method: "POST",
+          headers: authHeaders(true),
         }
       );
 
@@ -95,6 +114,7 @@ export default function VideoPage() {
         `${API_BASE_URL}/video/session/${session.id}/end`,
         {
           method: "POST",
+          headers: authHeaders(true),
         }
       );
 
@@ -122,98 +142,100 @@ export default function VideoPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-950 px-6 py-10 text-white">
-      <div className="mx-auto max-w-5xl">
-        <h1 className="text-3xl font-bold">PrepPilot Video Interview</h1>
+    <PageShell
+      eyebrow="Video // Jitsi WebRTC"
+      title="Video Interview"
+      description="Start a video interview session using Jitsi Meet."
+      icon="videocam"
+    >
+      {error && (
+        <div className="p-3 rounded-xl bg-error-container/20 border border-error/30 text-error text-sm">
+          {error}
+        </div>
+      )}
 
-        <p className="mt-2 text-gray-400">
-          Start a video interview session using Jitsi Meet.
-        </p>
-
-        {error && (
-          <div className="mt-6 rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-red-300">
-            {error}
-          </div>
-        )}
-
-        {!session && (
+      {!session && (
+        <ObsidianCard>
+          <p className="text-sm text-on-surface-variant mb-5">
+            Create a new interview room, then join when you are ready.
+          </p>
           <button
             onClick={createSession}
             disabled={loading}
-            className="mt-8 rounded-lg bg-blue-600 px-6 py-3 font-medium hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-sm font-semibold text-white hover:brightness-110 transition-all disabled:opacity-40"
           >
             {loading ? "Creating..." : "Create Interview Session"}
           </button>
-        )}
+        </ObsidianCard>
+      )}
 
-        {session && (
-          <div className="mt-8">
-            <div className="mb-6 rounded-lg border border-gray-800 bg-gray-900 p-5">
-              <p>
-                <span className="text-gray-400">Status:</span>{" "}
-                <span className="font-semibold capitalize">
-                  {session.status}
-                </span>
-              </p>
+      {session && (
+        <div className="flex flex-col gap-6">
+          <ObsidianCard>
+            <p className="text-sm text-on-surface-variant">
+              Status:{" "}
+              <span className="font-semibold capitalize text-on-surface">
+                {session.status}
+              </span>
+            </p>
 
-              <p className="mt-2 text-sm text-gray-400">
-                Room: {session.room_name}
-              </p>
+            <p className="mt-2 font-code-mono text-xs text-outline">
+              Room: {session.room_name}
+            </p>
 
-              {session.status === "waiting" && (
-                <button
-                  onClick={joinSession}
-                  disabled={loading}
-                  className="mt-5 rounded-lg bg-green-600 px-6 py-3 font-medium hover:bg-green-500 disabled:opacity-50"
-                >
-                  {loading ? "Joining..." : "Join Interview"}
-                </button>
-              )}
-
-              {session.status === "active" && (
-                <button
-                  onClick={endSession}
-                  disabled={loading}
-                  className="mt-5 rounded-lg bg-red-600 px-6 py-3 font-medium hover:bg-red-500 disabled:opacity-50"
-                >
-                  {loading ? "Ending..." : "End Interview"}
-                </button>
-              )}
-
-              {session.status === "ended" && (
-                <p className="mt-5 text-red-400">
-                  This interview session has ended.
-                </p>
-              )}
-            </div>
+            {session.status === "waiting" && (
+              <button
+                onClick={joinSession}
+                disabled={loading}
+                className="mt-5 px-4 py-2.5 rounded-xl bg-tertiary-container/30 text-tertiary border border-tertiary/30 text-sm font-semibold hover:brightness-110 transition-all disabled:opacity-40"
+              >
+                {loading ? "Joining..." : "Join Interview"}
+              </button>
+            )}
 
             {session.status === "active" && (
-              <div className="overflow-hidden rounded-xl border border-gray-800 bg-black">
-                <JitsiMeeting
-                  domain="meet.jit.si"
-                  roomName={session.room_name}
-                  configOverwrite={{
-                    startWithAudioMuted: false,
-                    startWithVideoMuted: false,
-                    disableModeratorIndicator: true,
-                  }}
-                  interfaceConfigOverwrite={{
-                    SHOW_JITSI_WATERMARK: false,
-                  }}
-                  userInfo={{
-                    displayName: "PrepPilot Candidate",
-                    email: "candidate@preppilot.com",
-                  }}
-                  getIFrameRef={(iframe) => {
-                    iframe.style.height = "700px";
-                    iframe.style.width = "100%";
-                  }}
-                />
-              </div>
+              <button
+                onClick={endSession}
+                disabled={loading}
+                className="mt-5 px-4 py-2.5 rounded-xl bg-error-container/20 border border-error/30 text-error text-sm font-semibold hover:brightness-110 transition-all disabled:opacity-40"
+              >
+                {loading ? "Ending..." : "End Interview"}
+              </button>
             )}
-          </div>
-        )}
-      </div>
-    </main>
+
+            {session.status === "ended" && (
+              <p className="mt-5 text-sm text-error">
+                This interview session has ended.
+              </p>
+            )}
+          </ObsidianCard>
+
+          {session.status === "active" && (
+            <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-surface-container-lowest">
+              <JitsiMeeting
+                domain="meet.jit.si"
+                roomName={session.room_name}
+                configOverwrite={{
+                  startWithAudioMuted: false,
+                  startWithVideoMuted: false,
+                  disableModeratorIndicator: true,
+                }}
+                interfaceConfigOverwrite={{
+                  SHOW_JITSI_WATERMARK: false,
+                }}
+                userInfo={{
+                  displayName,
+                  email,
+                }}
+                getIFrameRef={(iframe) => {
+                  iframe.style.height = "700px";
+                  iframe.style.width = "100%";
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </PageShell>
   );
 }

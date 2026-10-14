@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
-from typing import Optional, Literal
+from typing import Optional
 from app.core.database import get_db
-from app.core.security import create_access_token, get_current_user, DEMO_USERS
+from app.core.security import create_access_token, get_current_user
 from app.schemas.common import APIResponse, APIError
 from app.schemas.user import UserCreate, UserResponse, UserRole
 from app.services.user_service import user_service
@@ -13,9 +13,6 @@ router = APIRouter()
 class LoginRequest(BaseModel):
     email: str
     password: str
-
-class DemoLoginRequest(BaseModel):
-    role: Literal["candidate", "expert", "admin"] = "candidate"
 
 class AuthResponse(BaseModel):
     token: str
@@ -81,19 +78,6 @@ async def login(login_in: LoginRequest, db: AsyncSession = Depends(get_db)):
         return APIResponse(data=AuthResponse(token=token, user=user_resp))
     except Exception as e:
         return APIResponse(error=APIError(message=str(e)))
-
-@router.post("/demo-login", response_model=APIResponse[AuthResponse])
-async def demo_login(req: DemoLoginRequest):
-    """Instantly authenticate as Candidate, Expert, or Admin for zero-friction evaluation."""
-    demo_data = DEMO_USERS.get(req.role, DEMO_USERS["candidate"])
-    token = f"demo-token-{req.role}"
-    user_resp = UserResponse(
-        id=demo_data["sub"],
-        email=demo_data["email"],
-        role=demo_data["role"],
-        full_name=demo_data["full_name"]
-    )
-    return APIResponse(data=AuthResponse(token=token, user=user_resp))
 
 @router.get("/me", response_model=APIResponse[UserResponse])
 async def get_me(current_user: UserResponse = Depends(get_current_user)):

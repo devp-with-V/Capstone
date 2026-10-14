@@ -4,13 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { UserRole } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Rocket, User, GraduationCap, AlertCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { PageShell, ObsidianCard } from "@/components/layout/PageShell";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -43,102 +37,104 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-muted/30 p-4 py-8">
-      <div className="w-full max-w-md space-y-6">
-        <div className="flex flex-col items-center gap-2 mb-6">
-          <div className="h-12 w-12 bg-primary/10 rounded-2xl border border-primary/20 flex items-center justify-center">
-            <Rocket className="h-6 w-6 text-primary" />
-          </div>
-          <h1 className="text-2xl font-bold">Join PrepPilot</h1>
-          <p className="text-sm text-muted-foreground">Create an account to start your preparation journey</p>
-        </div>
+    <PageShell
+      eyebrow="Access // Join PrepPilot"
+      title="Join PrepPilot"
+      description="Create an account to start your preparation journey."
+      icon="rocket_launch"
+    >
+      <div className="w-full max-w-md mx-auto">
+        <ObsidianCard>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-on-surface">Create an account</h2>
+              <p className="text-sm text-on-surface-variant">Select your account type and fill in your details</p>
+            </div>
 
-        <Card className="border-border/80 shadow-lg">
-          <form onSubmit={handleSubmit}>
-            <CardHeader>
-              <CardTitle>Create an account</CardTitle>
-              <CardDescription>Select your account type and fill in your details</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {error && (
-                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
+            {error && (
+              <div className="p-3 rounded-xl bg-error-container/20 border border-error/30 text-error text-sm flex items-center gap-2">
+                <span className="material-symbols-outlined text-base shrink-0">error</span>
+                <span>{error}</span>
+              </div>
+            )}
 
-              <div className="grid grid-cols-2 gap-4 mb-2">
-                <div 
-                  className={cn(
-                    "border rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer transition-all",
-                    role === "candidate" ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"
-                  )}
-                  onClick={() => setRole("candidate")}
-                >
-                  <User className={cn("h-6 w-6", role === "candidate" ? "text-primary" : "text-muted-foreground")} />
-                  <span className="text-sm font-medium">Student</span>
-                </div>
-                <div 
-                  className={cn(
-                    "border rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer transition-all",
-                    role === "expert" ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"
-                  )}
-                  onClick={() => setRole("expert")}
-                >
-                  <GraduationCap className={cn("h-6 w-6", role === "expert" ? "text-primary" : "text-muted-foreground")} />
-                  <span className="text-sm font-medium">Mentor</span>
-                </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div
+                onClick={() => setRole("candidate")}
+                className={`rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer transition-all border ${
+                  role === "candidate"
+                    ? "border-primary bg-primary-container/15 text-on-surface border"
+                    : "bg-surface-container-high text-on-surface-variant border-white/[0.06] hover:text-on-surface"
+                }`}
+              >
+                <span className="material-symbols-outlined text-[24px]">person</span>
+                <span className="text-sm font-medium">Student</span>
               </div>
+              <div
+                onClick={() => setRole("expert")}
+                className={`rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer transition-all border ${
+                  role === "expert"
+                    ? "border-primary bg-primary-container/15 text-on-surface border"
+                    : "bg-surface-container-high text-on-surface-variant border-white/[0.06] hover:text-on-surface"
+                }`}
+              >
+                <span className="material-symbols-outlined text-[24px]">school</span>
+                <span className="text-sm font-medium">Mentor</span>
+              </div>
+            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  placeholder="John Doe"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" className="w-full mt-4" disabled={loading}>
-                {loading ? "Creating Account..." : `Sign Up as ${role === "expert" ? "Expert" : "Candidate"}`}
-              </Button>
-            </CardContent>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="name" className="text-xs font-medium text-on-surface-variant">Full Name</label>
+              <input
+                id="name"
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                className="w-full px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="email" className="text-xs font-medium text-on-surface-variant">Email</label>
+              <input
+                id="email"
+                type="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="password" className="text-xs font-medium text-on-surface-variant">Password</label>
+              <input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-sm font-semibold text-white hover:brightness-110 transition-all disabled:opacity-40"
+            >
+              {loading ? "Creating Account..." : `Sign Up as ${role === "expert" ? "Expert" : "Candidate"}`}
+            </button>
           </form>
 
-          <CardFooter className="border-t pt-4">
-            <div className="text-sm text-center text-muted-foreground w-full">
-              Already have an account?{" "}
-              <Link href="/login" className="text-primary font-medium hover:underline">
-                Log in
-              </Link>
-            </div>
-          </CardFooter>
-        </Card>
+          <div className="text-sm text-center text-on-surface-variant w-full mt-6 pt-4 border-t border-white/[0.08]">
+            Already have an account?{" "}
+            <Link href="/login" className="text-primary font-medium hover:underline">
+              Log in
+            </Link>
+          </div>
+        </ObsidianCard>
       </div>
-    </div>
+    </PageShell>
   );
 }
-

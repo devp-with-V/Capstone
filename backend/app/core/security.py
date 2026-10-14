@@ -15,28 +15,6 @@ security = HTTPBearer(auto_error=False)
 DEV_SECRET = "preppilot-dev-secret-key-32chars-min-needed!"
 ALGORITHM = "HS256"
 
-# Demo profiles for zero-friction local development and evaluation
-DEMO_USERS: Dict[str, Dict[str, Any]] = {
-    "candidate": {
-        "sub": "mock-candidate-001",
-        "email": "candidate@preppilot.com",
-        "role": "candidate",
-        "full_name": "Demo Candidate (Ananya)",
-    },
-    "expert": {
-        "sub": "mock-expert-002",
-        "email": "expert@preppilot.com",
-        "role": "expert",
-        "full_name": "Demo Expert (Rohit, SDE-2)",
-    },
-    "admin": {
-        "sub": "mock-admin-003",
-        "email": "admin@preppilot.com",
-        "role": "admin",
-        "full_name": "Demo Admin (Platform)",
-    },
-}
-
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Create a signed JWT token for dev/direct authentication."""
     to_encode = data.copy()
@@ -56,16 +34,7 @@ def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(s
 
     token = credentials.credentials.strip()
 
-    # Fast-path 1: Demo / Dev Tokens (e.g., "demo-token-candidate", "demo-candidate")
-    for role_key, demo_user in DEMO_USERS.items():
-        if token in (f"demo-token-{role_key}", f"demo-{role_key}", f"demo-session-token-{role_key}"):
-            return demo_user
-
-    # Legacy demo token fallback
-    if token == "demo-session-token-prep-pilot":
-        return DEMO_USERS["candidate"]
-
-    # Path 2: Supabase JWT verification (if secret configured)
+    # Path 1: Supabase JWT verification (if secret configured)
     if settings.SUPABASE_JWT_SECRET:
         try:
             payload = jwt.decode(
@@ -88,7 +57,7 @@ def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(s
         except JWTError:
             pass  # Fall through to try DEV_SECRET before rejecting
 
-    # Path 3: Dev Fallback JWT
+    # Path 2: Dev Fallback JWT (issued by /api/auth/signup and /api/auth/login)
     try:
         payload = jwt.decode(token, DEV_SECRET, algorithms=[ALGORITHM])
         return payload

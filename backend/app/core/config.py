@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    OPENROUTER_MODEL: str = "openrouter/free"
+    WHISPER_MODEL: str = "tiny"
     CORS_ORIGINS: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

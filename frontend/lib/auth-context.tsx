@@ -11,8 +11,6 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   signup: (email: string, password: string, fullName: string, role: UserRole) => Promise<{ success: boolean; error?: string }>;
-  loginAsDemo: (role: UserRole) => Promise<void>;
-  switchRole: (role: UserRole) => Promise<void>;
   logout: () => void;
 }
 
@@ -37,18 +35,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
         } else {
-          // Default to a candidate demo session so user can explore immediately
-          const defaultUser: User = {
-            id: "mock-candidate-001",
-            email: "candidate@preppilot.com",
-            role: "candidate",
-            full_name: "Demo Candidate (Ananya)",
-          };
-          const defaultToken = "demo-token-candidate";
-          setToken(defaultToken);
-          setUser(defaultUser);
-          localStorage.setItem(TOKEN_KEY, defaultToken);
-          localStorage.setItem(USER_KEY, JSON.stringify(defaultUser));
+          setToken(null);
+          setUser(null);
         }
 
         // Verify with Supabase if configured
@@ -197,38 +185,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginAsDemo = async (role: UserRole) => {
-    setIsLoading(true);
-    try {
-      const res = await apiPost<AuthResponse>("/api/auth/demo-login", { role });
-      if (res.data) {
-        setUser(res.data.user);
-        setToken(res.data.token);
-        localStorage.setItem(TOKEN_KEY, res.data.token);
-        localStorage.setItem(USER_KEY, JSON.stringify(res.data.user));
-      } else {
-        // Direct fallback
-        const fallbackUser: User = {
-          id: `mock-${role}-001`,
-          email: `${role}@preppilot.com`,
-          role,
-          full_name: `Demo ${role.charAt(0).toUpperCase() + role.slice(1)}`,
-        };
-        const fallbackToken = `demo-token-${role}`;
-        setUser(fallbackUser);
-        setToken(fallbackToken);
-        localStorage.setItem(TOKEN_KEY, fallbackToken);
-        localStorage.setItem(USER_KEY, JSON.stringify(fallbackUser));
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const switchRole = async (role: UserRole) => {
-    await loginAsDemo(role);
-  };
-
   const logout = () => {
     if (isSupabaseConfigured) {
       supabase.auth.signOut().catch(console.error);
@@ -247,8 +203,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         login,
         signup,
-        loginAsDemo,
-        switchRole,
         logout,
       }}
     >

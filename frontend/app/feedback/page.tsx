@@ -1,28 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PageShell, ObsidianCard } from "@/components/layout/PageShell";
 import { apiGet } from "@/lib/api";
-import {
-  Rocket,
-  MessageSquare,
-  Code2,
-  Lightbulb,
-  UserRound,
-  Award,
-  CheckCircle2,
-  TrendingUp,
-  Sparkles,
-} from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 type FeedbackReport = {
   data: {
@@ -43,17 +23,23 @@ type FeedbackReport = {
   } | null;
 };
 
+const INPUT_CLASS =
+  "w-full px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary";
+const PRIMARY_BTN =
+  "px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-sm font-semibold text-white hover:brightness-110 transition-all disabled:opacity-40";
+
 export default function FeedbackPage() {
-  const [sessionId, setSessionId] = useState("demo-session-002");
+  const [sessionId, setSessionId] = useState("");
   const [report, setReport] = useState<FeedbackReport["data"]>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const loadReport = async () => {
+  const loadReport = async (id?: string) => {
+    const lookupId = (id ?? sessionId).trim();
     setError("");
     setReport(null);
 
-    if (!sessionId.trim()) {
+    if (!lookupId) {
       setError("Please enter an interview session ID.");
       return;
     }
@@ -61,7 +47,7 @@ export default function FeedbackPage() {
     setLoading(true);
 
     const result = await apiGet<FeedbackReport>(
-      `/api/feedback/${sessionId.trim()}`
+      `/api/feedback/${lookupId}`
     );
 
     if (result.error) {
@@ -81,300 +67,249 @@ export default function FeedbackPage() {
   };
 
   useEffect(() => {
-    loadReport();
+    // Deep link from a finished AI interview: /feedback?sessionId=<ai-session-id>
+    const q = new URLSearchParams(window.location.search).get("sessionId");
+    if (q && q.trim()) {
+      setSessionId(q.trim());
+      loadReport(q.trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navbar */}
-      <nav className="border-b bg-card">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <Rocket className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold tracking-tight">
-              PrepPilot
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <Avatar>
-              <AvatarFallback>JD</AvatarFallback>
-            </Avatar>
+    <PageShell
+      eyebrow="Feedback // Session Report"
+      title="Interview Performance"
+      description="Your AI-generated interview feedback and performance report."
+      icon="forum"
+      wide
+    >
+      {/* Session selector */}
+      <ObsidianCard>
+        <div className="flex items-center gap-3 mb-5">
+          <span className="material-symbols-outlined text-primary text-[22px]">
+            person
+          </span>
+          <div>
+            <h2 className="text-base font-semibold text-on-surface">
+              Interview Session
+            </h2>
+            <p className="text-sm text-on-surface-variant">
+              View the performance report generated for your interview.
+            </p>
           </div>
         </div>
-      </nav>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <input
+            value={sessionId}
+            onChange={(e) => setSessionId(e.target.value)}
+            placeholder="Enter interview session ID"
+            className={INPUT_CLASS}
+          />
+          <button
+            onClick={() => loadReport()}
+            disabled={loading}
+            className={`${PRIMARY_BTN} shrink-0`}
+          >
+            {loading ? "Loading..." : "View Report"}
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-outline">
+          Your report is generated from the results of your interview.
+        </p>
+      </ObsidianCard>
 
-      <main className="container mx-auto max-w-4xl px-4 py-8">
-        {/* Page heading */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
-              <MessageSquare className="h-6 w-6 text-primary" />
-            </div>
+      {/* Error */}
+      {error && (
+        <div className="p-3 rounded-xl bg-error-container/20 border border-error/30 text-error text-sm">
+          {error}
+        </div>
+      )}
 
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                Interview Performance
-              </h1>
-              <p className="mt-1 text-muted-foreground">
-                Your AI-generated interview feedback and performance report.
+      {/* Report */}
+      {report && (
+        <div className="space-y-6">
+          {/* Overall score hero */}
+          <ObsidianCard className="text-center">
+            <div className="flex flex-col items-center">
+              <span className="material-symbols-outlined text-primary text-[40px] mb-3">
+                workspace_premium
+              </span>
+              <p className="font-code-mono text-[11px] text-outline uppercase">
+                Overall Interview Score
+              </p>
+              <p className="mt-1 text-5xl font-bold text-on-surface">
+                {report.overall_score}
+                <span className="text-2xl text-outline">/5</span>
+              </p>
+              <p className="mt-2 font-code-mono text-xs text-outline">
+                Session: {report.session_id}
               </p>
             </div>
-          </div>
-        </div>
+          </ObsidianCard>
 
-        {/* Session selector */}
-        <Card className="mb-6">
-          <CardHeader className="border-b bg-muted/20">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <UserRound className="h-5 w-5 text-primary" />
-              </div>
-
-              <div>
-                <CardTitle>Interview Session</CardTitle>
-                <CardDescription>
-                  View the performance report generated for your interview.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="pt-6">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Input
-                value={sessionId}
-                onChange={(e) => setSessionId(e.target.value)}
-                placeholder="Enter interview session ID"
-                className="bg-background"
-              />
-
-              <Button onClick={loadReport} disabled={loading}>
-                {loading ? "Loading..." : "View Report"}
-              </Button>
-            </div>
-
-            <p className="mt-2 text-xs text-muted-foreground">
-              Your report is generated from the results of your interview.
+          {/* Category scores */}
+          <ObsidianCard>
+            <h2 className="text-base font-semibold text-on-surface">
+              Performance Breakdown
+            </h2>
+            <p className="text-sm text-on-surface-variant mb-5">
+              Your performance across the key interview areas.
             </p>
-          </CardContent>
-        </Card>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-6 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
-        {/* Report */}
-        {report && (
-          <div className="space-y-6">
-            {/* Overall score */}
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex flex-col items-center text-center">
-                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-                    <Award className="h-7 w-7 text-primary" />
-                  </div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Overall Interview Score
-                  </p>
-
-                  <p className="mt-1 text-5xl font-bold">
-                    {report.overall_score}
-                    <span className="text-2xl text-muted-foreground">
-                      /5
-                    </span>
-                  </p>
-
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Session: {report.session_id}
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="p-4 rounded-xl bg-surface-container-high border border-white/[0.04]">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary text-[20px]">
+                    record_voice_over
+                  </span>
+                  <p className="text-sm font-medium text-on-surface">
+                    Communication
                   </p>
                 </div>
-              </CardContent>
-            </Card>
+                <p className="text-3xl font-bold text-on-surface">
+                  {report.communication_score}
+                  <span className="text-base font-normal text-outline">/5</span>
+                </p>
+                <p className="mt-2 font-code-mono text-[11px] text-outline uppercase">
+                  Clarity &amp; confidence
+                </p>
+              </div>
 
-            {/* Category scores */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Performance Breakdown</CardTitle>
-                <CardDescription>
-                  Your performance across the key interview areas.
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-lg border p-5">
-                    <div className="mb-3 flex items-center gap-2">
-                      <MessageSquare className="h-5 w-5 text-primary" />
-                      <p className="font-medium">Communication</p>
-                    </div>
-
-                    <p className="text-3xl font-bold">
-                      {report.communication_score}
-                      <span className="text-base font-normal text-muted-foreground">
-                        /5
-                      </span>
-                    </p>
-
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Clarity, confidence and communication.
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border p-5">
-                    <div className="mb-3 flex items-center gap-2">
-                      <Code2 className="h-5 w-5 text-primary" />
-                      <p className="font-medium">Technical Knowledge</p>
-                    </div>
-
-                    <p className="text-3xl font-bold">
-                      {report.technical_score}
-                      <span className="text-base font-normal text-muted-foreground">
-                        /5
-                      </span>
-                    </p>
-
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Technical understanding and accuracy.
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border p-5">
-                    <div className="mb-3 flex items-center gap-2">
-                      <Lightbulb className="h-5 w-5 text-primary" />
-                      <p className="font-medium">Problem Solving</p>
-                    </div>
-
-                    <p className="text-3xl font-bold">
-                      {report.problem_solving_score}
-                      <span className="text-base font-normal text-muted-foreground">
-                        /5
-                      </span>
-                    </p>
-
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Logical thinking and approach to problems.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Strengths */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                  </div>
-
-                  <div>
-                    <CardTitle>Strengths</CardTitle>
-                    <CardDescription>
-                      Areas where you performed well.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                <div className="space-y-3">
-                  {report.strengths.map((strength, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-3 rounded-lg border p-4"
-                    >
-                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                      <p className="text-sm">{strength}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Areas for improvement */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                  </div>
-
-                  <div>
-                    <CardTitle>Areas for Improvement</CardTitle>
-                    <CardDescription>
-                      Suggestions to help you perform better in future
-                      interviews.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                <div className="space-y-3">
-                  {report.areas_for_improvement.map((area, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-3 rounded-lg border p-4"
-                    >
-                      <TrendingUp className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                      <p className="text-sm">{area}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* AI recommendation */}
-            {report.recommendation && (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Sparkles className="h-5 w-5 text-primary" />
-                    </div>
-
-                    <div>
-                      <CardTitle>AI Recommendation</CardTitle>
-                      <CardDescription>
-                        Personalized guidance based on your interview
-                        performance.
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CardContent>
-                  <div className="rounded-lg border bg-muted/20 p-5">
-                    <p className="text-sm leading-6">
-                      {report.recommendation}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Interview comments */}
-            {report.comments && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Interview Summary</CardTitle>
-                </CardHeader>
-
-                <CardContent>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {report.comments}
+              <div className="p-4 rounded-xl bg-surface-container-high border border-white/[0.04]">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary text-[20px]">
+                    code
+                  </span>
+                  <p className="text-sm font-medium text-on-surface">
+                    Technical Knowledge
                   </p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )}
-      </main>
-    </div>
+                </div>
+                <p className="text-3xl font-bold text-on-surface">
+                  {report.technical_score}
+                  <span className="text-base font-normal text-outline">/5</span>
+                </p>
+                <p className="mt-2 font-code-mono text-[11px] text-outline uppercase">
+                  Understanding &amp; accuracy
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-surface-container-high border border-white/[0.04]">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary text-[20px]">
+                    psychology
+                  </span>
+                  <p className="text-sm font-medium text-on-surface">
+                    Problem Solving
+                  </p>
+                </div>
+                <p className="text-3xl font-bold text-on-surface">
+                  {report.problem_solving_score}
+                  <span className="text-base font-normal text-outline">/5</span>
+                </p>
+                <p className="mt-2 font-code-mono text-[11px] text-outline uppercase">
+                  Logic &amp; approach
+                </p>
+              </div>
+            </div>
+          </ObsidianCard>
+
+          {/* Strengths */}
+          <ObsidianCard>
+            <div className="flex items-center gap-3 mb-5">
+              <span className="material-symbols-outlined text-tertiary text-[22px]">
+                check_circle
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-on-surface">
+                  Strengths
+                </h2>
+                <p className="text-sm text-on-surface-variant">
+                  Areas where you performed well.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {report.strengths.map((strength, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 rounded-xl bg-surface-container-low border border-white/[0.08] p-4"
+                >
+                  <span className="material-symbols-outlined text-tertiary text-[20px] mt-0.5 shrink-0">
+                    check_circle
+                  </span>
+                  <p className="text-sm text-on-surface">{strength}</p>
+                </div>
+              ))}
+            </div>
+          </ObsidianCard>
+
+          {/* Areas for improvement */}
+          <ObsidianCard>
+            <div className="flex items-center gap-3 mb-5">
+              <span className="material-symbols-outlined text-primary text-[22px]">
+                trending_up
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-on-surface">
+                  Areas for Improvement
+                </h2>
+                <p className="text-sm text-on-surface-variant">
+                  Suggestions to help you perform better in future interviews.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {report.areas_for_improvement.map((area, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 rounded-xl bg-surface-container-low border border-white/[0.08] p-4"
+                >
+                  <span className="material-symbols-outlined text-primary text-[20px] mt-0.5 shrink-0">
+                    trending_up
+                  </span>
+                  <p className="text-sm text-on-surface">{area}</p>
+                </div>
+              ))}
+            </div>
+          </ObsidianCard>
+
+          {/* AI recommendation */}
+          {report.recommendation && (
+            <ObsidianCard>
+              <div className="flex items-center gap-3 mb-5">
+                <span className="material-symbols-outlined text-secondary text-[22px]">
+                  sparkles
+                </span>
+                <div>
+                  <h2 className="text-base font-semibold text-on-surface">
+                    AI Recommendation
+                  </h2>
+                  <p className="text-sm text-on-surface-variant">
+                    Personalized guidance based on your interview performance.
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-xl bg-surface-container-low border border-white/[0.08] p-5">
+                <p className="text-sm leading-6 text-on-surface">
+                  {report.recommendation}
+                </p>
+              </div>
+            </ObsidianCard>
+          )}
+
+          {/* Interview comments */}
+          {report.comments && (
+            <ObsidianCard>
+              <h2 className="text-base font-semibold text-on-surface mb-3">
+                Interview Summary
+              </h2>
+              <p className="text-sm leading-6 text-on-surface-variant">
+                {report.comments}
+              </p>
+            </ObsidianCard>
+          )}
+        </div>
+      )}
+    </PageShell>
   );
 }

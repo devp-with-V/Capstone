@@ -34,7 +34,7 @@ class AIService:
         if self.gemini_configured:
             try:
                 genai.configure(api_key=settings.GEMINI_API_KEY)
-                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                self.gemini_model = genai.GenerativeModel('gemini-3.8-flash')
             except Exception as e:
                 print(f"[AIService] Failed to configure Gemini: {e}")
                 self.gemini_configured = False

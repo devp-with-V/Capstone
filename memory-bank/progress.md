@@ -34,29 +34,34 @@
 - [x] Normalized feedback calculation supporting 1-5 and 0-100 scales with strengths and improvements
 - [x] Seeded demo session `demo-session-002` viewable on `/feedback`
 
-### Pages & Routing (0 Broken Links / 0 404s)
+### Pages & Routing (0 Broken Links / 0 404s, unified Obsidian Gloss shell)
 - [x] `/` (Landing Page with Login / Signup header and active CTAs)
-- [x] `/login` & `/signup`
-- [x] `/resume` & `/resume/report`
-- [x] `/mock-interview`
-- [x] `/mentors` & `/booking`
-- [x] `/feedback`
-- [x] `/video`
-- [x] `/profile`
-- [x] `/expert`
-- [x] `/admin`
+- [x] `/login` & `/signup` (Obsidian restyle, real Supabase/backend auth, no auto-demo)
+- [x] `/resume` & `/resume/report` (shared global header/footer, no per-page duplicate)
+- [x] `/mock-interview` (setup gate: role/level/domain/duration/questions/JD + mic pre-flight → live AURA session; route guarded by auth)
+- [x] `/mentors` & `/booking` (Obsidian; shared global header/footer)
+- [x] `/feedback` (Obsidian restyle, session-ID lookup + report sections)
+- [x] `/video` (Obsidian restyle, real user id/email + Bearer token on session APIs)
+- [x] `/profile` (Obsidian restyle)
+- [x] `/expert` (Obsidian restyle)
+- [x] `/admin` (Obsidian restyle)
 - [x] `/jd-analyzer`
 - [x] `/report`
 - [x] `/jobs`
 - [x] `/teams`
+- [x] Shared `components/layout/` (`AppHeader`, `AppFooter`, `PageShell`/`ObsidianCard`); `components/Navbar.tsx` removed
+- [x] Demo auth removed frontend + backend (`demo-login` endpoint, `DEMO_USERS`, demo-token fast-paths deleted)
 
 ---
 
 ## Remaining Work (Team Delegation Plan)
 
-### Teammate 1: AI Mock Interview Polish & Rubric Export
-- [ ] Save full interview conversation transcripts to the database.
-- [ ] Implement an automated "End Interview & Generate Rubric" action in `/mock-interview` that posts to `/api/feedback`.
+### Teammate 1: AI Mock Interview — session persistence (DONE 2026-10-13, needs deploy steps)
+- [x] `ai_interview_sessions` / `ai_interview_turns` tables + migration `20261013_ai_sessions` (SQL verified; NOT yet applied — run `alembic upgrade head` where Supabase is reachable).
+- [x] `POST /api/ai/sessions`, `/sessions/{id}/turns` (Whisper STT + live analysis), `/sessions/{id}/finish` (final rubric → `feedback` row) — smoke-tested live via Gemini (`gemini-3.8-flash`; `gemini-1.5-flash` is dead for this key).
+- [x] `/mock-interview` setup gate + camera/mic pre-flight, browser-TTS questions, local session video (device-only, downloadable) + per-answer audio → local Whisper STT, finish → `/feedback?sessionId=`.
+- [ ] Optional: `GROQ_API_KEY` as hosted STT fallback (local Whisper is primary; typed answers work with neither).
+- [ ] No Storage bucket needed anymore (video never leaves the device).
 
 ### Teammate 2: Video Interview Experience (Jitsi)
 - [ ] Connect the meeting room link from the booking confirmation directly to the `/video` page route with room query param.

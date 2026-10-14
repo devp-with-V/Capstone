@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiPost } from "@/lib/api";
+import { apiPost, apiUpload } from "@/lib/api";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 
 interface DialogueMessage {
   id: string;
@@ -16,21 +17,638 @@ interface DialogueMessage {
 }
 
 export default function MockInterviewPage() {
+  return (
+    <ProtectedRoute allowedRoles={["candidate", "expert", "admin"]}>
+      <MockInterviewContent />
+    </ProtectedRoute>
+  );
+}
+
+const ROLE_PRESETS = [
+  "Software Engineer",
+  "Frontend Engineer",
+  "Backend Engineer",
+  "ML Engineer",
+  "Data Engineer",
+  "DevOps / SRE",
+  "Engineering Manager",
+];
+
+const DOMAIN_OPTIONS = [
+  "Data Structures & Algorithms",
+  "System Design",
+  "Distributed Systems & Concurrency",
+  "Behavioral & Leadership",
+  "Frontend & UI Engineering",
+];
+
+const DURATION_OPTIONS = [15, 30, 45];
+const QUESTION_OPTIONS = [5, 8, 12];
+
+const INPUT_CLS =
+  "w-full px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary";
+const LABEL_CLS = "text-xs font-medium text-on-surface-variant";
+
+function MockInterviewContent() {
   const router = useRouter();
 
-  // Elapsed Timer state
-  const [elapsedSeconds, setElapsedSeconds] = useState(24 * 60 + 18);
+  // ---- Setup phase (prerequisites & config) ----
+  const [phase, setPhase] = useState<"setup" | "live">("setup");
+  const [targetRole, setTargetRole] = useState("Backend Engineer");
+  const [level, setLevel] = useState("Senior");
+  const [domain, setDomain] = useState(DOMAIN_OPTIONS[2]);
+  const [mode, setMode] = useState<"voice" | "text">("voice");
+  const [durationMin, setDurationMin] = useState(30);
+  const [questionCount, setQuestionCount] = useState(8);
+  const [jobDescription, setJobDescription] = useState("");
+  const [micStatus, setMicStatus] = useState<"idle" | "checking" | "ready" | "denied">("idle");
+  const [camStatus, setCamStatus] = useState<"idle" | "checking" | "ready" | "denied">("idle");
+  const setupPreviewRef = useRef<HTMLVideoElement | null>(null);
+
+  const checkMic = async () => {
+    setMicStatus("checking");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      setMicStatus("ready");
+    } catch {
+      setMicStatus("denied");
+    }
+  };
+
+  // Camera is mandatory for the interview: the whole session is recorded.
+  // The granted stream is kept and reused when the live session starts.
+  const checkCamera = async () => {
+    setCamStatus("checking");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: true,
+      });
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      streamRef.current = stream;
+      if (setupPreviewRef.current) {
+        setupPreviewRef.current.srcObject = stream;
+      }
+      setCamStatus("ready");
+      setCameraActive(true);
+    } catch {
+      setCamStatus("denied");
+    }
+  };
+
+  const canStart =
+    targetRole.trim().length > 0 &&
+    camStatus === "ready" &&
+    (mode === "text" || micStatus === "ready");
+
+  // ---- Live session engine: backend session + recording + TTS ----
+  // Elapsed Timer state (runs only during live session)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   useEffect(() => {
+    if (phase !== "live") return;
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [phase]);
 
   const formatTimer = (total: number) => {
     const mins = String(Math.floor(total / 60)).padStart(2, "0");
     const secs = String(total % 60).padStart(2, "0");
     return `${mins}:${secs}`;
+  };
+
+  // Dialogue messages state (seeded on Start from setup config)
+  const [messages, setMessages] = useState<DialogueMessage[]>([]);
+
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [qIndex, setQIndex] = useState(0);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [answerError, setAnswerError] = useState("");
+  const [liveScores, setLiveScores] = useState<{
+    depth: number;
+    clarity: number;
+    star: number;
+    note: string;
+    count: number;
+  } | null>(null);
+  const [turnCount, setTurnCount] = useState(0);
+  const [finishing, setFinishing] = useState(false);
+  const [finishError, setFinishError] = useState("");
+  const [sessionVideoUrl, setSessionVideoUrl] = useState<string | null>(null);
+
+  const streamRef = useRef<MediaStream | null>(null);
+  const sessionRecorderRef = useRef<MediaRecorder | null>(null);
+  const sessionChunksRef = useRef<Blob[]>([]);
+  const answerRecorderRef = useRef<MediaRecorder | null>(null);
+  const answerChunksRef = useRef<Blob[]>([]);
+  const liveVideoRef = useRef<HTMLVideoElement | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const qIndexRef = useRef(0);
+  const questionsRef = useRef<string[]>([]);
+  const meterCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const meterRef = useRef<{ ctx: AudioContext; raf: number } | null>(null);
+  const recStartRef = useRef(0);
+  const [recSeconds, setRecSeconds] = useState(0);
+
+  // Browser TTS: the AI's questions are spoken aloud, no backend key needed.
+  // `speakingId` drives the Replay/volume indicator + orb state.
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+
+  const pickVoice = (): SpeechSynthesisVoice | null => {
+    try {
+      const voices = window.speechSynthesis.getVoices();
+      return (
+        voices.find((v) => v.lang.startsWith("en") && /google|natural/i.test(v.name)) ||
+        voices.find((v) => v.lang.startsWith("en")) ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  };
+
+  // Warm the (async-loading) voice list so the first question has a voice ready.
+  useEffect(() => {
+    try {
+      window.speechSynthesis?.getVoices();
+      const onVoices = () => window.speechSynthesis?.getVoices();
+      window.speechSynthesis?.addEventListener?.("voiceschanged", onVoices);
+      return () => window.speechSynthesis?.removeEventListener?.("voiceschanged", onVoices);
+    } catch {
+      return undefined;
+    }
+  }, []);
+
+  const speak = (text: string, msgId?: string) => {
+    try {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text.replace(/^[“"]|[”"]$/g, ""));
+      utter.rate = 1;
+      const voice = pickVoice();
+      if (voice) utter.voice = voice;
+      utter.onend = () => setSpeakingId(null);
+      utter.onerror = () => setSpeakingId(null);
+      setSpeakingId(msgId || "live");
+      window.speechSynthesis.speak(utter);
+      // Safety: some browsers drop the utterance silently — clear a stuck state.
+      setTimeout(() => {
+        try {
+          if (!window.speechSynthesis.speaking) setSpeakingId(null);
+        } catch {
+          /* noop */
+        }
+      }, 15000);
+    } catch {
+      setSpeakingId(null);
+    }
+  };
+
+  const pickMime = (candidates: string[]): string => {
+    try {
+      for (const c of candidates) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
+      }
+    } catch {
+      /* fall through to default */
+    }
+    return "";
+  };
+
+  const pushAiMessage = (content: string, streaming = false) => {
+    setMessages((prev) =>
+      prev.concat({
+        id: `msg-ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        sender: "ai",
+        senderName: "AI Proctor (AURA)",
+        timestamp: formatTimer(elapsedSeconds),
+        content,
+        isStreaming: streaming || undefined,
+      })
+    );
+  };
+
+  const pushCandidateMessage = (content: string) => {
+    setMessages((prev) =>
+      prev.concat({
+        id: `msg-${Date.now()}`,
+        sender: "candidate",
+        senderName: "You (Candidate)",
+        timestamp: formatTimer(elapsedSeconds),
+        content,
+      })
+    );
+  };
+
+  const askQuestion = (idx: number, list: string[]) => {
+    const q = list[idx];
+    if (!q) return;
+    pushAiMessage(`“Q${idx + 1}/${list.length}: ${q}”`);
+    speak(`Question ${idx + 1}. ${q}`);
+  };
+
+  const ensureStream = async (): Promise<MediaStream> => {
+    const existing = streamRef.current;
+    if (existing && existing.getVideoTracks().some((t) => t.readyState === "live")) {
+      return existing;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: true,
+    });
+    streamRef.current = stream;
+    return stream;
+  };
+
+  const stopAllMedia = () => {
+    try {
+      window.speechSynthesis?.cancel();
+    } catch {
+      /* noop */
+    }
+    for (const rec of [answerRecorderRef.current, sessionRecorderRef.current]) {
+      try {
+        if (rec && rec.state !== "inactive") rec.stop();
+      } catch {
+        /* noop */
+      }
+    }
+    answerRecorderRef.current = null;
+    sessionRecorderRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+
+  // Stop tracks when leaving the page mid-interview.
+  useEffect(() => {
+    return () => {
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* noop */
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  // Auto-scroll the dialogue as it grows.
+  useEffect(() => {
+    const el = document.getElementById("dialogue-container");
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  // Attach the camera stream once the live layout (and its <video>) mounts.
+  useEffect(() => {
+    if (phase === "live" && liveVideoRef.current && streamRef.current) {
+      liveVideoRef.current.srcObject = streamRef.current;
+    }
+  }, [phase]);
+
+  // Recording timer.
+  useEffect(() => {
+    if (!recording) return;
+    setRecSeconds(0);
+    const t = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
+
+  const stopMeter = () => {
+    const m = meterRef.current;
+    meterRef.current = null;
+    if (!m) return;
+    try {
+      cancelAnimationFrame(m.raf);
+    } catch {
+      /* noop */
+    }
+    try {
+      void m.ctx.close();
+    } catch {
+      /* noop */
+    }
+  };
+
+  // Live mic level meter (AnalyserNode → canvas) while recording.
+  // Direct canvas drawing: no re-renders, proof on stage that voice is captured.
+  useEffect(() => {
+    if (!recording) {
+      stopMeter();
+      return;
+    }
+    const stream = streamRef.current;
+    const canvas = meterCanvasRef.current;
+    if (!stream || !canvas) return;
+    try {
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      void ctx.resume().catch(() => undefined);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const draw = () => {
+        const c = meterCanvasRef.current;
+        const m = meterRef.current;
+        if (!c || !m) return;
+        analyser.getByteFrequencyData(data);
+        const g = c.getContext("2d");
+        if (!g) return;
+        const W = (c.width = c.offsetWidth * 2 || 600);
+        const H = (c.height = 64);
+        g.clearRect(0, 0, W, H);
+        const bars = 48;
+        const step = W / bars;
+        for (let i = 0; i < bars; i++) {
+          const v = data[Math.floor((i / bars) * data.length)] / 255;
+          const h = Math.max(5, v * H);
+          g.fillStyle = v > 0.6 ? "#4edea3" : v > 0.25 ? "#c0c1ff" : "#464554";
+          g.fillRect(i * step + step * 0.2, (H - h) / 2, step * 0.6, h);
+        }
+        m.raf = requestAnimationFrame(draw);
+      };
+      meterRef.current = { ctx, raf: requestAnimationFrame(draw) };
+    } catch {
+      /* decorative only — recording still works */
+    }
+    return () => stopMeter();
+  }, [recording]);
+
+  const handleStart = async () => {
+    if (!canStart || starting) return;
+    setStarting(true);
+    setStartError("");
+    try {
+      // 1. Create the backend session → model writes tailored questions for this position.
+      const res = await apiPost<{
+        id: string;
+        questions: string[];
+        status: string;
+      }>("/api/ai/sessions", {
+        target_role: targetRole.trim(),
+        level,
+        domain,
+        duration_min: durationMin,
+        question_count: questionCount,
+        job_description: jobDescription.trim() || undefined,
+        mode,
+      });
+      if (res.error || !res.data) {
+        throw new Error(res.error || "Could not create the interview session.");
+      }
+      const qs =
+        res.data.questions && res.data.questions.length > 0
+          ? res.data.questions
+          : ["Give me a brief overview of your experience most relevant to this role."];
+      sessionIdRef.current = res.data.id;
+      setSessionId(res.data.id);
+      questionsRef.current = qs;
+      setQuestions(qs);
+      qIndexRef.current = 0;
+      setQIndex(0);
+      setTurnCount(0);
+      setLiveScores(null);
+      setElapsedSeconds(0);
+      setMessages([]);
+
+      // 2. Camera + session recording (local only). Recording must never
+      // block the interview: degrade gracefully if the encoder balks.
+      const stream = await ensureStream();
+      if (liveVideoRef.current) liveVideoRef.current.srcObject = stream;
+      sessionChunksRef.current = [];
+      const videoCandidates = [
+        pickMime(["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]),
+        "",
+      ];
+      for (const videoMime of videoCandidates) {
+        try {
+          const sessionRec = videoMime
+            ? new MediaRecorder(stream, { mimeType: videoMime })
+            : new MediaRecorder(stream);
+          sessionRec.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) sessionChunksRef.current.push(e.data);
+          };
+          sessionRec.start(2000);
+          sessionRecorderRef.current = sessionRec;
+          break;
+        } catch (e) {
+          sessionRecorderRef.current = null;
+          console.warn("[mock-interview] session recorder fallback:", e);
+        }
+      }
+
+      // 3. Go live: greeting + first question, spoken aloud.
+      setPhase("live");
+      pushAiMessage(
+        `“Welcome. This is a ${durationMin}-minute ${level} ${targetRole.trim()} interview on ${domain} — ${qs.length} questions. Your camera is recording. Let's begin.”`
+      );
+      setTimeout(() => askQuestion(0, qs), 600);
+    } catch (e: any) {
+      setStartError(e?.message || "Could not start the interview. Please try again.");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // Submit one answer: audio blob (voice) or raw text (typed fallback).
+  // Backend detaches audio → transcript (Groq Whisper) → live AI analysis.
+  const submitAnswer = async (opts: { audioBlob?: Blob; text?: string }) => {
+    const sid = sessionIdRef.current;
+    if (!sid || submitting) return;
+    const idx = qIndexRef.current;
+    const list = questionsRef.current;
+    setSubmitting(true);
+    setAnswerError("");
+    const thinkingId = `thinking-${Date.now()}`;
+    setMessages((prev) =>
+      prev.concat({
+        id: thinkingId,
+        sender: "ai",
+        senderName: "AI Proctor (AURA)",
+        timestamp: formatTimer(elapsedSeconds),
+        content: "Transcribing and analyzing your answer...",
+        isStreaming: true,
+      })
+    );
+    try {
+      const fd = new FormData();
+      fd.append("question_idx", String(idx));
+      if (opts.audioBlob) {
+        fd.append("audio", opts.audioBlob, "answer.webm");
+      } else {
+        fd.append("transcript", opts.text || "");
+      }
+      const res = await apiUpload<{
+        transcript: string;
+        analysis: { depth: number; clarity: number; star: number; note: string };
+      }>(`/api/ai/sessions/${sid}/turns`, fd);
+      if (res.error || !res.data) {
+        throw new Error(res.error || "Answer analysis failed.");
+      }
+      const { transcript, analysis } = res.data;
+      setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+      pushCandidateMessage(transcript);
+      setLiveScores((prev) => {
+        const n = (prev?.count || 0) + 1;
+        const avg = (old: number, cur: number) => Math.round((old * (n - 1) + cur) / n);
+        return {
+          depth: avg(prev?.depth || 0, analysis.depth),
+          clarity: avg(prev?.clarity || 0, analysis.clarity),
+          star: avg(prev?.star || 0, analysis.star),
+          note: analysis.note,
+          count: n,
+        };
+      });
+      setTurnCount((c) => c + 1);
+      if (idx + 1 < list.length) {
+        const next = idx + 1;
+        qIndexRef.current = next;
+        setQIndex(next);
+        pushAiMessage(`“${analysis.note}”`);
+        setTimeout(() => askQuestion(next, list), 900);
+      } else {
+        pushAiMessage(
+          "“That was the final question. Press Finish Round whenever you're ready and I'll compile your full report — it takes a few seconds.”"
+        );
+        speak("That was the final question. Press Finish Round and I'll compile your report.");
+      }
+    } catch (e: any) {
+      setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+      setAnswerError(e?.message || "Could not analyze that answer. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleStartAnswer = () => {
+    if (recording || submitting || !streamRef.current) return;
+    setAnswerError("");
+    answerChunksRef.current = [];
+    const stream = streamRef.current;
+    // isTypeSupported() can lie (reports audio/webm OK, then start() throws
+    // NotSupportedError on some Chrome/Edge builds), so try mime list in
+    // order and fall back to the browser default. Never leave the user dead.
+    const candidates = [
+      pickMime(["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]),
+      "",
+    ];
+    let rec: MediaRecorder | null = null;
+    for (const mime of candidates) {
+      try {
+        rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+        rec.start();
+        break;
+      } catch {
+        rec = null;
+      }
+    }
+    if (!rec) {
+      setAnswerError("Voice recording isn't supported in this browser — please type your answer instead.");
+      return;
+    }
+    rec.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) answerChunksRef.current.push(e.data);
+    };
+    rec.onstop = () => {
+      const elapsed = Date.now() - recStartRef.current;
+      const blob = new Blob(answerChunksRef.current, { type: rec.mimeType || "audio/webm" });
+      setRecording(false);
+      if (elapsed < 1500 || blob.size < 2000) {
+        setAnswerError("That was too short — hold your answer for at least a couple of seconds, then Stop & Send.");
+        return;
+      }
+      if (blob.size > 0) {
+        void submitAnswer({ audioBlob: blob });
+      }
+    };
+    answerRecorderRef.current = rec;
+    recStartRef.current = Date.now();
+    setRecording(true);
+  };
+
+  const handleStopAnswer = () => {
+    try {
+      answerRecorderRef.current?.stop();
+    } catch {
+      setRecording(false);
+    }
+  };
+
+  const collectSessionVideo = async (): Promise<Blob | null> => {
+    const rec = sessionRecorderRef.current;
+    if (!rec) {
+      return sessionChunksRef.current.length
+        ? new Blob(sessionChunksRef.current, { type: "video/webm" })
+        : null;
+    }
+    if (rec.state === "inactive") {
+      return sessionChunksRef.current.length
+        ? new Blob(sessionChunksRef.current, { type: rec.mimeType || "video/webm" })
+        : null;
+    }
+    return new Promise((resolve) => {
+      const done = () => {
+        try {
+          rec.removeEventListener("stop", done);
+        } catch {
+          /* noop */
+        }
+        resolve(
+          sessionChunksRef.current.length
+            ? new Blob(sessionChunksRef.current, { type: rec.mimeType || "video/webm" })
+            : null
+        );
+      };
+      rec.addEventListener("stop", done);
+      try {
+        rec.stop();
+      } catch {
+        done();
+      }
+      setTimeout(done, 4000);
+    });
+  };
+
+  const handleFinish = async () => {
+    const sid = sessionIdRef.current;
+    if (!sid || finishing) return;
+    setFinishing(true);
+    setFinishError("");
+    try {
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* noop */
+      }
+      // Keep the camera recording on this device only — downloadable below,
+      // never uploaded anywhere.
+      const videoBlob = await collectSessionVideo();
+      stopAllMedia();
+      if (videoBlob && videoBlob.size > 0) {
+        setSessionVideoUrl(URL.createObjectURL(videoBlob));
+      }
+      const res = await apiPost<{ session_id: string }>(
+        `/api/ai/sessions/${sid}/finish`,
+        {}
+      );
+      if (res.error || !res.data) {
+        throw new Error(res.error || "Report generation failed.");
+      }
+      router.push(`/feedback?sessionId=${res.data.session_id}`);
+    } catch (e: any) {
+      setFinishError(e?.message || "Could not generate the report. Please try again.");
+      setFinishing(false);
+    }
   };
 
   // Audio / Video Controls state
@@ -50,27 +668,6 @@ export default function MockInterviewPage() {
         \\                                             /
          +------------> [Global Sequence Buffer] <---+`);
 
-  // Dialogue messages state
-  const [messages, setMessages] = useState<DialogueMessage[]>([
-    {
-      id: "msg-1",
-      sender: "ai",
-      senderName: "AI Proctor (AURA)",
-      timestamp: "23:50",
-      content:
-        '“You suggested hashing by user_id to distribute incoming ledger journal transfers across your 64 Kafka partitions. Suppose one customer is Amazon or Shopify during Cyber Monday, bursting over 50,000 tx/sec onto that single key. How do you mitigate severe partition skew and the resulting consumer group lag without losing strict per-account event ordering?”',
-    },
-    {
-      id: "msg-2",
-      sender: "candidate",
-      senderName: "You (Candidate)",
-      timestamp: "24:12",
-      content:
-        '“To tackle hot partitions for giant VIP tenants, I\'d introduce dynamic salt sub-key partitioning combined with a composite ledger batcher. Instead of pure user_id, high-volume accounts get an ephemeral suffix—like user_id#hash(time_bucket_100ms)—distributing the write payload across an isolated sub-cluster of worker nodes. On the settlement side...”',
-      isStreaming: true,
-    },
-  ]);
-
   const [inputAnswer, setInputAnswer] = useState("");
 
   // Commit diagram from whiteboard
@@ -87,159 +684,300 @@ export default function MockInterviewPage() {
     setMessages((prev) => [...prev, newMsg]);
   };
 
-  // Send candidate message
+  // Send typed answer (fallback / text-only mode) — same backend analysis path.
   const handleSendAnswer = async () => {
-    if (!inputAnswer.trim()) return;
+    if (!inputAnswer.trim() || submitting || recording) return;
     const answerText = inputAnswer.trim();
-    const candidateMsg: DialogueMessage = {
-      id: `msg-${Date.now()}`,
-      sender: "candidate",
-      senderName: "You (Candidate)",
-      timestamp: formatTimer(elapsedSeconds),
-      content: answerText,
-    };
-    
-    const updatedMessages = [...messages, candidateMsg];
-    setMessages(updatedMessages);
     setInputAnswer("");
-
-    // Temporary typing indicator
-    const thinkingMsgId = `thinking-${Date.now()}`;
-    const thinkingMsg: DialogueMessage = {
-      id: thinkingMsgId,
-      sender: "ai",
-      senderName: "AI Proctor (AURA)",
-      timestamp: formatTimer(elapsedSeconds + 1),
-      content: "Analyzing architectural response...",
-      isStreaming: true,
-    };
-    setMessages((prev) => [...prev, thinkingMsg]);
-
-    try {
-      const res = await apiPost<{ reply: string; sender_name?: string }>("/api/ai/interview/chat", {
-        messages: updatedMessages.map((m) => ({
-          sender: m.sender,
-          content: m.content,
-          sender_name: m.senderName,
-        })),
-        target_role: "Staff Distributed Systems Engineer",
-      });
-
-      const replyContent =
-        res.data?.reply ||
-        "“Good architectural breakdown. How would you handle continuous ledger compaction while maintaining sub-millisecond read latency on historical balances?”";
-
-      setMessages((prev) =>
-        prev
-          .filter((m) => m.id !== thinkingMsgId)
-          .concat({
-            id: `msg-ai-${Date.now()}`,
-            sender: "ai",
-            senderName: res.data?.sender_name || "AI Proctor (AURA)",
-            timestamp: formatTimer(elapsedSeconds + 3),
-            content: `“${replyContent.replace(/^[“"]|[”"]$/g, "")}”`,
-          })
-      );
-    } catch {
-      // Fallback response if network or AI service drops
-      setMessages((prev) =>
-        prev
-          .filter((m) => m.id !== thinkingMsgId)
-          .concat({
-            id: `msg-ai-${Date.now()}`,
-            sender: "ai",
-            senderName: "AI Proctor (AURA)",
-            timestamp: formatTimer(elapsedSeconds + 3),
-            content:
-              "“Excellent insight on time-bucketed dynamic salting. How would you handle state reconciliation during node failover when sequence numbers must remain strictly monotonic across replicas?”",
-          })
-      );
-    }
+    await submitAnswer({ text: answerText });
   };
+
+  if (phase === "setup") {
+    return (
+      <div className="bg-background font-sans text-body-md text-on-surface antialiased min-h-screen selection:bg-primary-container selection:text-on-primary-container">
+        <main className="w-full pt-32 pb-20 relative overflow-hidden">
+          <div className="absolute -top-40 left-1/4 w-[420px] h-[420px] bg-secondary-container/20 rounded-full blur-[140px] pointer-events-none" />
+          <div className="absolute top-60 right-10 w-[500px] h-[500px] bg-primary-container/10 rounded-full blur-[160px] pointer-events-none" />
+          <div className="w-full px-4 sm:px-8 lg:px-12 max-w-5xl mx-auto flex flex-col gap-6 relative z-10">
+            <section className="flex flex-col gap-2">
+              <span className="font-code-mono text-xs text-primary uppercase tracking-widest font-semibold">
+                AI Mock Interview // Setup
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-primary text-[28px]">smart_toy</span>
+                <h1 className="font-headline-lg text-2xl sm:text-3xl font-bold text-on-surface tracking-tight">
+                  Configure your AI interview
+                </h1>
+              </div>
+              <p className="text-sm sm:text-base text-on-surface-variant leading-relaxed max-w-3xl">
+                No scheduling needed — AURA is available 24/7 and starts instantly. Tell it what
+                you&apos;re preparing for, check your mic, then launch. A rubric report is generated
+                when you finish.
+              </p>
+            </section>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left: what the interview covers */}
+              <div className="lg:col-span-7 rounded-2xl bg-surface-container p-6 border border-white/[0.08] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.08)] flex flex-col gap-4">
+                <h2 className="text-base font-bold text-on-surface">What this interview is about</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className={LABEL_CLS}>Target Role</label>
+                    <select
+                      className={INPUT_CLS}
+                      value={ROLE_PRESETS.includes(targetRole) ? targetRole : "custom"}
+                      onChange={(e) =>
+                        setTargetRole(e.target.value === "custom" ? "" : e.target.value)
+                      }
+                    >
+                      {ROLE_PRESETS.map((r) => (
+                        <option key={r} value={r} className="bg-surface-container-high">
+                          {r}
+                        </option>
+                      ))}
+                      <option value="custom" className="bg-surface-container-high">
+                        Custom…
+                      </option>
+                    </select>
+                    {!ROLE_PRESETS.includes(targetRole) && (
+                      <input
+                        className={INPUT_CLS}
+                        placeholder="e.g. Staff Backend Engineer"
+                        value={targetRole}
+                        onChange={(e) => setTargetRole(e.target.value)}
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={LABEL_CLS}>Level</label>
+                    <select
+                      className={INPUT_CLS}
+                      value={level}
+                      onChange={(e) => setLevel(e.target.value)}
+                    >
+                      {["Junior", "Mid-level", "Senior", "Staff", "Principal"].map((l) => (
+                        <option key={l} value={l} className="bg-surface-container-high">
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={LABEL_CLS}>Focus Domain</label>
+                  <div className="flex flex-wrap gap-2">
+                    {DOMAIN_OPTIONS.map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setDomain(d)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                          domain === d
+                            ? "bg-primary-container/20 text-primary border-primary/40"
+                            : "bg-surface-container-high text-on-surface-variant hover:text-on-surface border-white/[0.06]"
+                        }`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={LABEL_CLS}>
+                    Job Description <span className="text-outline">(optional — tailors questions)</span>
+                  </label>
+                  <textarea
+                    className={`${INPUT_CLS} resize-none font-code-mono text-xs`}
+                    rows={4}
+                    placeholder="Paste the target JD here, or analyze one first in the JD Analyzer…"
+                    value={jobDescription}
+                    onChange={(e) => setJobDescription(e.target.value)}
+                  />
+                  <Link href="/jd-analyzer" className="text-xs font-semibold text-secondary hover:underline">
+                    Open JD Analyzer →
+                  </Link>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className={LABEL_CLS}>Duration</label>
+                    <div className="flex gap-2">
+                      {DURATION_OPTIONS.map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => setDurationMin(m)}
+                          className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                            durationMin === m
+                              ? "bg-primary-container/20 text-primary border-primary/40"
+                              : "bg-surface-container-high text-on-surface-variant border-white/[0.06]"
+                          }`}
+                        >
+                          {m} min
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={LABEL_CLS}>Questions</label>
+                    <div className="flex gap-2">
+                      {QUESTION_OPTIONS.map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => setQuestionCount(q)}
+                          className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                            questionCount === q
+                              ? "bg-primary-container/20 text-primary border-primary/40"
+                              : "bg-surface-container-high text-on-surface-variant border-white/[0.06]"
+                          }`}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: prerequisites + launch */}
+              <div className="lg:col-span-5 flex flex-col gap-6">
+                <div className="rounded-2xl bg-surface-container p-6 border border-white/[0.08] flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-tertiary text-[20px]">checklist</span>
+                    <h2 className="text-base font-bold text-on-surface">Pre-flight checklist</h2>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-surface-container-low border border-white/[0.04] flex items-start gap-2.5">
+                    <span className="material-symbols-outlined text-secondary text-[18px]">mic</span>
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-on-surface">Microphone access</p>
+                      <p className="text-[11px] text-outline mt-0.5">
+                        {mode === "text"
+                          ? "Text-only mode — mic optional."
+                          : micStatus === "ready"
+                          ? "Mic live. AURA can hear you."
+                          : micStatus === "denied"
+                          ? "Mic blocked — allow access or switch to text-only."
+                          : "Required for voice mode."}
+                      </p>
+                    </div>
+                    <button
+                      onClick={checkMic}
+                      disabled={micStatus === "checking"}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all disabled:opacity-40 ${
+                        micStatus === "ready"
+                          ? "bg-tertiary-container/20 text-tertiary border-tertiary/30"
+                          : "bg-surface-container-high text-on-surface border-white/[0.08] hover:bg-surface-bright"
+                      }`}
+                    >
+                      {micStatus === "checking"
+                        ? "Checking…"
+                        : micStatus === "ready"
+                        ? "Ready ✓"
+                        : "Test Mic"}
+                    </button>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-surface-container-low border border-white/[0.04] flex flex-col gap-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <span className="material-symbols-outlined text-primary text-[18px]">videocam</span>
+                      <div className="flex-1">
+                        <p className="text-xs font-semibold text-on-surface">
+                          Camera access <span className="text-error">(required)</span>
+                        </p>
+                        <p className="text-[11px] text-outline mt-0.5">
+                          {camStatus === "ready"
+                            ? "Camera live. Recording stays on this device — nothing is uploaded."
+                            : camStatus === "denied"
+                            ? "Camera blocked — allow access to start the interview."
+                            : "The interviewer needs to see you; recording starts on launch."}
+                        </p>
+                      </div>
+                      <button
+                        onClick={checkCamera}
+                        disabled={camStatus === "checking"}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all disabled:opacity-40 shrink-0 ${
+                          camStatus === "ready"
+                            ? "bg-tertiary-container/20 text-tertiary border-tertiary/30"
+                            : "bg-surface-container-high text-on-surface border-white/[0.08] hover:bg-surface-bright"
+                        }`}
+                      >
+                        {camStatus === "checking"
+                          ? "Checking…"
+                          : camStatus === "ready"
+                          ? "Ready ✓"
+                          : "Enable Camera"}
+                      </button>
+                    </div>
+                    {camStatus === "ready" && (
+                      <video
+                        ref={setupPreviewRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-full h-36 object-cover rounded-lg border border-white/[0.06] bg-black"
+                      />
+                    )}
+                  </div>
+                  <div className="flex rounded-xl overflow-hidden border border-white/[0.06]">
+                    {(["voice", "text"] as const).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => setMode(m)}
+                        className={`flex-1 py-2 text-xs font-semibold transition-all ${
+                          mode === m
+                            ? "bg-surface-container-high text-primary"
+                            : "text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        {m === "voice" ? "Voice + Text" : "Text Only"}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() =>
+                      speak("Hi, I'm AURA, your AI interviewer. If you can hear this, your audio is ready for the interview.")
+                    }
+                    className="w-full py-2 rounded-xl bg-surface-container-high text-xs font-semibold text-on-surface hover:bg-surface-bright border border-white/[0.08] transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-secondary">
+                      {speakingId ? "volume_up" : "brand_awareness"}
+                    </span>
+                    {speakingId ? "Playing…" : "Test AURA's voice"}
+                  </button>
+                  <div className="p-3.5 rounded-xl bg-surface-container-low border border-white/[0.04] text-[11px] text-on-surface-variant leading-relaxed">
+                    Quiet room recommended. Answers are scored live on depth, clarity, and STAR
+                    structure. Finish anytime to generate your rubric report.
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleStart}
+                  disabled={!canStart || starting}
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-sm font-semibold text-white hover:brightness-110 transition-all disabled:opacity-40 shadow-[0_12px_28px_-4px_rgba(128,131,255,0.4)] flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[20px]">play_arrow</span>
+                  {starting
+                    ? "Writing your questions…"
+                    : `Start ${durationMin}-min Interview • ${questionCount} Questions`}
+                </button>
+                {startError && (
+                  <p className="text-xs text-center text-error bg-error-container/20 border border-error/30 rounded-xl px-3 py-2">
+                    {startError}
+                  </p>
+                )}
+                {!canStart && (
+                  <p className="text-[11px] text-center text-outline font-code-mono">
+                    {camStatus !== "ready"
+                      ? "Enable your camera to start — recording is mandatory."
+                      : "Test your mic above — or switch to Text Only to start now."}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-background font-sans text-body-md text-on-surface antialiased min-h-screen selection:bg-primary-container selection:text-on-primary-container">
-      {/* HEADER / NAVIGATION */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-surface/90 backdrop-blur-xl border-b border-white/[0.06] shadow-[0_1px_12px_rgba(0,0,0,0.5)]">
-        <div className="h-20 w-full px-4 sm:px-8 lg:px-12 flex items-center justify-between gap-4 max-w-7xl mx-auto">
-          {/* Logo & Brand */}
-          <Link href="/" className="flex items-center gap-3 shrink-0 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-container to-secondary-container flex items-center justify-center shadow-[0_0_20px_rgba(128,131,255,0.35)] group-hover:scale-105 transition-transform">
-              <span className="material-symbols-outlined text-white text-[22px]">rocket_launch</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-headline-sm text-lg font-bold text-on-surface tracking-tight leading-none group-hover:text-primary transition-colors">
-                PrepPilot
-              </span>
-              <span className="font-code-mono text-[10px] text-primary uppercase tracking-widest mt-1">
-                Intelligence &amp; Career Suite
-              </span>
-            </div>
-            <div className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-high border border-white/[0.08]">
-              <span className="w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse" />
-              <span className="font-code-mono text-[11px] text-tertiary uppercase tracking-wider">
-                v3.4 Production Ready
-              </span>
-            </div>
-          </Link>
-
-          {/* Action CTAs */}
-          <div className="flex items-center gap-3 shrink-0">
-            <Link
-              href="/mock-interview"
-              className="hidden md:inline-flex items-center px-4 py-2 rounded-lg bg-surface-container-high text-sm font-semibold text-primary border border-primary/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-            >
-              <span className="material-symbols-outlined text-[18px] mr-1.5 text-primary">smart_toy</span>
-              Active Simulation
-            </Link>
-            <Link
-              href="/mentors"
-              className="inline-flex items-center px-4 py-2 rounded-lg bg-gradient-to-r from-primary-container to-secondary-container text-sm font-semibold text-white hover:brightness-110 transition-all shadow-[0_8px_20px_-4px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25)]"
-            >
-              <span className="material-symbols-outlined text-[18px] mr-1.5">calendar_month</span>
-              Book Mentor
-            </Link>
-            <Link
-              href="/profile"
-              className="w-9 h-9 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center hover:border-primary transition-colors"
-              title="Candidate Profile"
-            >
-              <span className="material-symbols-outlined text-primary text-[20px]">person</span>
-            </Link>
-          </div>
-        </div>
-
-        {/* Secondary Services Navigation Strip */}
-        <div className="border-t border-white/[0.04] bg-surface-container-lowest/90 px-4 sm:px-8 lg:px-12 py-1.5 overflow-x-auto scrollbar-none">
-          <div className="flex items-center gap-2 max-w-7xl mx-auto text-xs whitespace-nowrap">
-            <Link href="/resume" className="px-2.5 py-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">description</span> Resume Review
-            </Link>
-            <Link
-              href="/mock-interview"
-              className="px-3 py-1 rounded-md text-primary font-semibold bg-surface-container-high shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] flex items-center gap-1 border border-primary/20"
-            >
-              <span className="material-symbols-outlined text-[14px]">smart_toy</span> AI Mock Interview
-            </Link>
-            <Link href="/mentors" className="px-2.5 py-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">record_voice_over</span> Mentor Marketplace
-            </Link>
-            <Link href="/report" className="px-2.5 py-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">analytics</span> Readiness Report
-            </Link>
-            <Link href="/jobs" className="px-2.5 py-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">manage_search</span> Jobs &amp; Matcher
-            </Link>
-            <Link href="/jd-analyzer" className="px-2.5 py-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">auto_stories</span> Custom JD Analyzer
-            </Link>
-            <Link href="/teams" className="px-2.5 py-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">domain</span> Institutional Teams OS
-            </Link>
-          </div>
-        </div>
-      </header>
-
       {/* MAIN CONTAINER */}
       <main className="w-full pt-32 pb-20">
         <div className="w-full px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto flex flex-col gap-6">
@@ -252,12 +990,15 @@ export default function MockInterviewPage() {
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
-                  <span className="font-headline-sm text-base font-bold text-on-surface">Distributed Systems &amp; Concurrency</span>
+                  <span className="font-headline-sm text-base font-bold text-on-surface">{domain}</span>
                   <span className="font-code-mono text-[11px] px-2 py-0.5 rounded bg-surface-container-high text-primary border border-primary/20">
-                    Staff Level
+                    {level}
                   </span>
                 </div>
-                <span className="text-xs text-on-surface-variant">Target: Staff Backend Engineer @ Stripe (Ledger Infrastructure)</span>
+                <span className="text-xs text-on-surface-variant">Target: {level} {targetRole}{jobDescription.trim() ? " (JD-tailored)" : ""} • {mode === "voice" ? "Voice + Text" : "Text Only"} • {questionCount} questions</span>
+                <span className="font-code-mono text-[11px] px-2 py-0.5 rounded bg-tertiary-container/20 text-tertiary border border-tertiary/20 w-fit">
+                  Q{qIndex + 1}/{questions.length || questionCount} • {turnCount} answered
+                </span>
               </div>
             </div>
 
@@ -270,10 +1011,12 @@ export default function MockInterviewPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 bg-surface-container px-3.5 py-1.5 rounded-xl border border-white/[0.04] shadow-sm">
-                <span className="material-symbols-outlined text-tertiary text-[18px]">network_check</span>
+                <span className={`w-2 h-2 rounded-full ${recording ? "bg-error animate-ping" : "bg-surface-bright"}`} />
                 <div className="flex flex-col">
-                  <span className="font-code-mono text-[10px] text-outline uppercase tracking-wider">Voice Latency</span>
-                  <span className="font-code-mono text-xs font-bold text-tertiary">186ms RTT</span>
+                  <span className="font-code-mono text-[10px] text-outline uppercase tracking-wider">Answer Rec</span>
+                  <span className={`font-code-mono text-xs font-bold ${recording ? "text-error" : "text-on-surface-variant"}`}>
+                    {recording ? "REC" : submitting ? "Scoring…" : "Idle"}
+                  </span>
                 </div>
               </div>
               <button
@@ -303,7 +1046,11 @@ export default function MockInterviewPage() {
                   </div>
                   <div className="flex items-center gap-1.5 bg-surface-container-low px-3 py-1 rounded-full text-on-surface-variant text-xs border border-white/[0.04]">
                     <span className="material-symbols-outlined text-primary text-[14px]">psychology</span>
-                    <span>Evaluating: Kafka Hotspotting Under VIP Burst</span>
+                    <span className="truncate max-w-64">
+                      {questions[qIndex]
+                        ? `Evaluating Q${qIndex + 1}: ${questions[qIndex].slice(0, 64)}${questions[qIndex].length > 64 ? "…" : ""}`
+                        : "Preparing questions…"}
+                    </span>
                   </div>
                 </div>
 
@@ -339,8 +1086,16 @@ export default function MockInterviewPage() {
                   </div>
 
                   <div className="mt-2 flex items-center gap-2 font-code-mono text-xs text-primary">
-                    <span className="inline-block w-2 h-2 rounded-full bg-tertiary" />
-                    <span className="font-semibold">CHALLENGE STATE: DEEP ARCHITECTURAL DRILL-DOWN</span>
+                    <span
+                      className={`inline-block w-2 h-2 rounded-full ${
+                        speakingId ? "bg-primary animate-ping" : "bg-tertiary"
+                      }`}
+                    />
+                    <span className="font-semibold">
+                      {speakingId
+                        ? "AURA IS SPEAKING — LISTEN IN…"
+                        : `CHALLENGE STATE: QUESTION ${qIndex + 1} OF ${questions.length || questionCount}`}
+                    </span>
                   </div>
                 </div>
 
@@ -355,17 +1110,6 @@ export default function MockInterviewPage() {
 
               {/* Real-Time Dialogue Stream Card */}
               <div className="w-full bg-surface-container rounded-2xl p-6 border border-white/[0.08] shadow-lg flex flex-col gap-4">
-                <div className="flex items-center justify-between pb-1 border-b border-white/[0.04]">
-                  <div className="flex items-center gap-2 text-on-surface">
-                    <span className="material-symbols-outlined text-primary text-[20px]">forum</span>
-                    <h2 className="font-headline-sm text-base font-bold">Real-Time Dialogue Stream</h2>
-                  </div>
-                  <div className="flex items-center gap-1 text-outline text-xs font-code-mono">
-                    <span className="material-symbols-outlined text-[14px]">auto_read_pause</span>
-                    <span>Continuous Speech Ingestion</span>
-                  </div>
-                </div>
-
                 {/* Dialogue Container */}
                 <div className="flex flex-col gap-3.5 overflow-y-auto max-h-[380px] pr-1 scrollbar-none" id="dialogue-container">
                   {messages.map((msg) => (
@@ -389,6 +1133,21 @@ export default function MockInterviewPage() {
                           {msg.senderName}
                         </span>
                         <div className="flex items-center gap-2">
+                          {msg.sender === "ai" && !msg.isStreaming && !msg.isBlueprint && (
+                            <button
+                              onClick={() => speak(msg.content, msg.id)}
+                              className="p-1 rounded-lg text-outline hover:text-primary hover:bg-surface-container-high transition-all"
+                              title="Replay aloud"
+                            >
+                              <span
+                                className={`material-symbols-outlined text-[16px] ${
+                                  speakingId === msg.id ? "animate-pulse text-primary" : ""
+                                }`}
+                              >
+                                {speakingId === msg.id ? "volume_up" : "replay"}
+                              </span>
+                            </button>
+                          )}
                           {msg.isStreaming && (
                             <span className="px-2 py-0.5 rounded bg-surface-container text-tertiary font-code-mono text-[10px] border border-tertiary/20">
                               Streaming
@@ -409,55 +1168,71 @@ export default function MockInterviewPage() {
                 </div>
 
                 {/* Candidate Typed Response Input (Sync with Voice) */}
+                {answerError && (
+                  <div className="p-3 rounded-xl bg-error-container/20 border border-error/30 text-error text-xs">
+                    {answerError}
+                  </div>
+                )}
                 <div className="flex items-center gap-2 pt-1">
+                  {mode === "voice" &&
+                    (recording ? (
+                      <button
+                        onClick={handleStopAnswer}
+                        className="px-4 py-2.5 rounded-xl bg-error/20 text-error text-xs font-semibold hover:bg-error hover:text-white transition-all flex items-center gap-1 border border-error/40 shrink-0"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-error animate-ping" />
+                        Stop & Send
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleStartAnswer}
+                        disabled={submitting}
+                        className="px-4 py-2.5 rounded-xl bg-tertiary-container/20 text-tertiary text-xs font-semibold hover:bg-tertiary-container/30 transition-all disabled:opacity-40 flex items-center gap-1 border border-tertiary/30 shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">mic</span>
+                        Answer
+                      </button>
+                    ))}
                   <input
                     type="text"
                     value={inputAnswer}
                     onChange={(e) => setInputAnswer(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSendAnswer()}
-                    placeholder="Type supplementary explanation or architectural clarification..."
-                    className="flex-1 px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-xs text-on-surface placeholder:text-outline focus:outline-none focus:border-primary"
+                    placeholder={
+                      recording
+                        ? "Recording your voice answer — press Stop & Send…"
+                        : "Type your answer, or press Answer to speak…"
+                    }
+                    disabled={recording || submitting}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-xs text-on-surface placeholder:text-outline focus:outline-none focus:border-primary disabled:opacity-50"
                   />
                   <button
                     onClick={handleSendAnswer}
-                    disabled={!inputAnswer.trim()}
-                    className="px-4 py-2.5 rounded-xl bg-primary-container text-white text-xs font-semibold hover:brightness-110 transition-all disabled:opacity-40 flex items-center gap-1"
+                    disabled={!inputAnswer.trim() || submitting || recording}
+                    className="px-4 py-2.5 rounded-xl bg-primary-container text-white text-xs font-semibold hover:brightness-110 transition-all disabled:opacity-40 flex items-center gap-1 shrink-0"
                   >
-                    <span className="material-symbols-outlined text-[16px]">send</span> Send
+                    <span className="material-symbols-outlined text-[16px]">send</span>
+                    {submitting ? "Scoring…" : "Send"}
                   </button>
                 </div>
 
-                {/* Mic Capture Bar & Voice Waveform */}
+                {/* Mic Capture Bar & Voice Waveform (live meter while recording) */}
                 <div className="bg-surface-container-lowest p-4 rounded-xl border border-white/[0.05] flex flex-col gap-2">
                   <div className="flex items-center justify-between text-xs text-on-surface-variant">
                     <span className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${isMuted ? "bg-error" : "bg-tertiary animate-pulse"}`} />
-                      {isMuted ? "Microphone Muted" : "Mic Capture (High Definition Studio 48kHz)"}
+                      <span className={`w-2 h-2 rounded-full ${isMuted ? "bg-error" : recording ? "bg-error animate-ping" : "bg-tertiary animate-pulse"}`} />
+                      {isMuted
+                        ? "Microphone Muted"
+                        : recording
+                        ? `Recording answer • REC ${formatTimer(recSeconds)}`
+                        : "Mic Capture (High Definition Studio 48kHz)"}
                     </span>
-                    <span className="text-outline font-code-mono text-xs">Dynamic Noise Gate: -42dB</span>
+                    <span className="text-outline font-code-mono text-xs">
+                      {recording ? "Speak now — bars jump as you talk" : "Dynamic Noise Gate: -42dB"}
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-2 h-8 w-full py-1">
-                    <div className={`h-2 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/40"}`} />
-                    <div className={`h-4 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/70"}`} />
-                    <div className={`h-6 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary"}`} />
-                    <div className={`h-3 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/60"}`} />
-                    <div className={`h-5 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary"}`} />
-                    <div className={`h-2 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/40"}`} />
-                    <div className={`h-7 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary animate-pulse"}`} />
-                    <div className={`h-4 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/80"}`} />
-                    <div className={`h-2 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/30"}`} />
-                    <div className={`h-5 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary"}`} />
-                    <div className={`h-3 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary/60"}`} />
-                    <div className={`h-6 rounded-full w-2 ${isMuted ? "bg-outline/20" : "bg-tertiary"}`} />
-                    <div className="flex-1 bg-surface-container-high h-1.5 rounded-full overflow-hidden ml-3">
-                      <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          isMuted ? "bg-outline/30 w-0" : "bg-gradient-to-r from-tertiary via-primary to-secondary w-3/4"
-                        }`}
-                      />
-                    </div>
-                  </div>
+                  <canvas ref={meterCanvasRef} className="w-full h-8" />
 
                   <div className="flex items-center justify-between text-xs font-code-mono text-outline pt-1">
                     <div className="flex items-center gap-3">
@@ -473,7 +1248,13 @@ export default function MockInterviewPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setIsMuted(!isMuted)}
+                      onClick={() => {
+                        const next = !isMuted;
+                        setIsMuted(next);
+                        streamRef.current?.getAudioTracks().forEach((t) => {
+                          t.enabled = !next;
+                        });
+                      }}
                       className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold border ${
                         isMuted
                           ? "bg-error/20 text-error border-error/30"
@@ -485,7 +1266,13 @@ export default function MockInterviewPage() {
                     </button>
 
                     <button
-                      onClick={() => setCameraActive(!cameraActive)}
+                      onClick={() => {
+                        const next = !cameraActive;
+                        setCameraActive(next);
+                        streamRef.current?.getVideoTracks().forEach((t) => {
+                          t.enabled = next;
+                        });
+                      }}
                       className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold border ${
                         cameraActive
                           ? "bg-primary/20 text-primary border-primary/30"
@@ -511,6 +1298,35 @@ export default function MockInterviewPage() {
 
             {/* Right 4 Columns */}
             <div className="lg:col-span-4 flex flex-col gap-6">
+              {/* Live Camera Preview (mandatory recording) */}
+              <div className="w-full bg-surface-container rounded-2xl overflow-hidden border border-white/[0.08] shadow-lg">
+                <div className="relative bg-black">
+                  <video
+                    ref={liveVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="w-full h-52 object-cover"
+                  />
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 border border-error/40">
+                    <span className="w-2 h-2 rounded-full bg-error animate-ping" />
+                    <span className="font-code-mono text-[10px] font-bold text-error uppercase tracking-wider">
+                      Recording
+                    </span>
+                  </div>
+                  <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 font-code-mono text-[10px] text-on-surface">
+                    You • {formatTimer(elapsedSeconds)}
+                  </div>
+                </div>
+                <div className="px-4 py-2.5 flex items-center justify-between border-t border-white/[0.05]">
+                  <span className="font-code-mono text-[11px] text-outline uppercase tracking-wider">
+                    Session capture → this device
+                  </span>
+                  <span className="font-code-mono text-[11px] text-tertiary">
+                    {turnCount} answer{turnCount === 1 ? "" : "s"} saved
+                  </span>
+                </div>
+              </div>
               {/* Live Rubric Telemetry Card */}
               <div className="w-full bg-surface-container rounded-2xl p-6 border border-white/[0.08] shadow-lg flex flex-col gap-4">
                 <div className="flex items-center justify-between">
@@ -531,12 +1347,17 @@ export default function MockInterviewPage() {
                         <span className="material-symbols-outlined text-primary text-[16px]">account_tree</span>
                         System Depth &amp; Trade-offs
                       </span>
-                      <span className="font-code-mono text-primary font-bold">94%</span>
+                      <span className="font-code-mono text-primary font-bold">
+                        {liveScores ? `${liveScores.depth}%` : "—"}
+                      </span>
                     </div>
                     <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden mt-1">
-                      <div className="bg-gradient-to-r from-primary-container to-primary h-full rounded-full w-[94%]" />
+                      <div
+                        className="bg-gradient-to-r from-primary-container to-primary h-full rounded-full transition-all"
+                        style={{ width: `${liveScores?.depth || 0}%` }}
+                      />
                     </div>
-                    <span className="text-[11px] text-outline mt-0.5">High competence in data durability, idempotency tokens &amp; sharding.</span>
+                    <span className="text-[11px] text-outline mt-0.5">Running average across answered questions.</span>
                   </div>
 
                   {/* Communication Clarity */}
@@ -546,10 +1367,15 @@ export default function MockInterviewPage() {
                         <span className="material-symbols-outlined text-tertiary text-[16px]">record_voice_over</span>
                         Communication Clarity
                       </span>
-                      <span className="font-code-mono text-tertiary font-bold">88%</span>
+                      <span className="font-code-mono text-tertiary font-bold">
+                        {liveScores ? `${liveScores.clarity}%` : "—"}
+                      </span>
                     </div>
                     <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden mt-1">
-                      <div className="bg-gradient-to-r from-tertiary-container to-tertiary h-full rounded-full w-[88%]" />
+                      <div
+                        className="bg-gradient-to-r from-tertiary-container to-tertiary h-full rounded-full transition-all"
+                        style={{ width: `${liveScores?.clarity || 0}%` }}
+                      />
                     </div>
                     <span className="text-[11px] text-outline mt-0.5">Precise nomenclature, direct responses without hedging behavior.</span>
                   </div>
@@ -561,12 +1387,19 @@ export default function MockInterviewPage() {
                         <span className="material-symbols-outlined text-secondary text-[16px]">stars</span>
                         STAR Framework Fidelity
                       </span>
-                      <span className="font-code-mono text-secondary font-bold">92%</span>
+                      <span className="font-code-mono text-secondary font-bold">
+                        {liveScores ? `${liveScores.star}%` : "—"}
+                      </span>
                     </div>
                     <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden mt-1">
-                      <div className="bg-gradient-to-r from-secondary-container to-secondary h-full rounded-full w-[92%]" />
+                      <div
+                        className="bg-gradient-to-r from-secondary-container to-secondary h-full rounded-full transition-all"
+                        style={{ width: `${liveScores?.star || 0}%` }}
+                      />
                     </div>
-                    <span className="text-[11px] text-outline mt-0.5">Structured progression from hypothesis through execution metric proofs.</span>
+                    <span className="text-[11px] text-outline mt-0.5">
+                      {liveScores?.note || "Answer questions to start live scoring."}
+                    </span>
                   </div>
                 </div>
 
@@ -728,125 +1561,91 @@ export default function MockInterviewPage() {
                 <div className="w-8 h-8 rounded-lg bg-tertiary-container/30 text-tertiary flex items-center justify-center">
                   <span className="material-symbols-outlined text-[20px]">task_alt</span>
                 </div>
-                <h3 className="text-lg font-bold text-on-surface">Simulation Concluded</h3>
+                <h3 className="text-lg font-bold text-on-surface">End Interview & Get Report</h3>
               </div>
-              <button onClick={() => setShowFinishModal(false)} className="text-outline hover:text-on-surface">
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
+              {!finishing && (
+                <button onClick={() => setShowFinishModal(false)} className="text-outline hover:text-on-surface">
+                  <span className="material-symbols-outlined text-[20px]">close</span>
+                </button>
+              )}
             </div>
 
-            <div className="flex flex-col items-center text-center gap-2">
-              <span className="font-code-mono text-xs text-tertiary uppercase tracking-wider font-semibold">Staff Bar Met</span>
-              <div className="flex items-baseline gap-1">
-                <span className="text-5xl font-extrabold text-tertiary">91</span>
-                <span className="font-code-mono text-sm text-outline">/100</span>
+            {finishError && (
+              <div className="p-3 rounded-xl bg-error-container/20 border border-error/30 text-error text-xs">
+                {finishError}
               </div>
-              <p className="text-xs text-on-surface-variant max-w-sm mt-1">
-                Outstanding grasp of distributed event streams and sharding tradeoffs. Minor improvement advised on partition tolerance rollbacks.
-              </p>
-            </div>
+            )}
 
-            <div className="grid grid-cols-3 gap-2.5 text-center font-code-mono text-xs">
-              <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
-                <span className="text-[10px] text-outline uppercase block">Depth</span>
-                <span className="text-primary font-bold text-sm">94%</span>
+            {finishing ? (
+              <div className="flex flex-col items-center text-center gap-3 py-6">
+                <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                <p className="text-sm font-semibold text-on-surface">
+                  Analyzing your full interview…
+                </p>
+                <p className="text-xs text-on-surface-variant max-w-sm">
+                  Saving the session recording, aggregating per-answer scores, and writing your
+                  rubric report. This takes a few seconds.
+                </p>
               </div>
-              <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
-                <span className="text-[10px] text-outline uppercase block">Clarity</span>
-                <span className="text-tertiary font-bold text-sm">88%</span>
-              </div>
-              <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
-                <span className="text-[10px] text-outline uppercase block">STAR</span>
-                <span className="text-secondary font-bold text-sm">92%</span>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex flex-col items-center text-center gap-2">
+                  <span className="font-code-mono text-xs text-tertiary uppercase tracking-wider font-semibold">
+                    {turnCount} of {questions.length || questionCount} answered
+                  </span>
+                  <p className="text-xs text-on-surface-variant max-w-sm mt-1">
+                    Ending generates an AI rubric report from every transcribed answer and takes
+                    you straight to it. Your camera recording stays on this device only.
+                  </p>
+                  {sessionVideoUrl && (
+                    <a
+                      href={sessionVideoUrl}
+                      download={`preppilot-interview-${sessionIdRef.current || "session"}.webm`}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-surface-container-high text-xs font-medium text-on-surface hover:bg-surface-bright border border-white/[0.08]"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">download</span>
+                      Download my recording
+                    </a>
+                  )}
+                </div>
 
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={() => setShowFinishModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-surface-container text-xs font-semibold text-on-surface-variant hover:text-on-surface border border-white/[0.08]"
-              >
-                Resume Round
-              </button>
-              <button
-                onClick={() => router.push("/report")}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-xs font-semibold text-white hover:brightness-110 shadow-md flex items-center justify-center gap-1"
-              >
-                View Full Report →
-              </button>
-            </div>
+                {liveScores && (
+                  <div className="grid grid-cols-3 gap-2.5 text-center font-code-mono text-xs">
+                    <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
+                      <span className="text-[10px] text-outline uppercase block">Depth</span>
+                      <span className="text-primary font-bold text-sm">{liveScores.depth}%</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
+                      <span className="text-[10px] text-outline uppercase block">Clarity</span>
+                      <span className="text-tertiary font-bold text-sm">{liveScores.clarity}%</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface-container border border-white/[0.04]">
+                      <span className="text-[10px] text-outline uppercase block">STAR</span>
+                      <span className="text-secondary font-bold text-sm">{liveScores.star}%</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    onClick={() => setShowFinishModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-surface-container text-xs font-semibold text-on-surface-variant hover:text-on-surface border border-white/[0.08]"
+                  >
+                    Keep Answering
+                  </button>
+                  <button
+                    onClick={handleFinish}
+                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-secondary-container text-xs font-semibold text-white hover:brightness-110 shadow-md flex items-center justify-center gap-1"
+                  >
+                    End & Generate Report →
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* FOOTER */}
-      <footer className="w-full bg-surface-container-lowest text-on-surface-variant py-14 border-t border-white/[0.04]">
-        <div className="w-full px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto flex flex-col gap-10">
-          <div className="flex flex-wrap items-center justify-between gap-6 pb-8 border-b border-white/[0.05]">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                <span className="material-symbols-outlined text-surface text-[18px]">rocket_launch</span>
-              </div>
-              <span className="font-bold text-base text-on-surface">PrepPilot Platform Matrix</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high border border-white/[0.06]">
-                <span className="material-symbols-outlined text-tertiary text-[14px]">verified_user</span>
-                <span className="text-xs text-on-surface">SOC2 Type II</span>
-              </div>
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high border border-white/[0.06]">
-                <span className="material-symbols-outlined text-secondary text-[14px]">hub</span>
-                <span className="text-xs text-on-surface">ATS Ingestion API</span>
-              </div>
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high border border-white/[0.06]">
-                <span className="material-symbols-outlined text-primary text-[14px]">videocam</span>
-                <span className="text-xs text-on-surface">Jitsi WebRTC Mesh</span>
-              </div>
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high border border-white/[0.06]">
-                <span className="w-2 h-2 rounded-full bg-tertiary" />
-                <span className="text-xs text-on-surface">99.9% Core SLA</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-xs">
-            <div className="flex flex-col gap-2">
-              <span className="font-semibold text-on-surface uppercase tracking-wider mb-1 font-code-mono">Candidate Services</span>
-              <Link href="/resume" className="hover:text-on-surface transition-colors">ATS Resume Review</Link>
-              <Link href="/mock-interview" className="hover:text-on-surface transition-colors">AI Mock Simulation</Link>
-              <Link href="/mentors" className="hover:text-on-surface transition-colors">Verified Mentors</Link>
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-semibold text-on-surface uppercase tracking-wider mb-1 font-code-mono">Intelligence &amp; Jobs</span>
-              <Link href="/report" className="hover:text-on-surface transition-colors">Readiness Index &amp; Radar</Link>
-              <Link href="/jobs" className="hover:text-on-surface transition-colors">Live Job Matching</Link>
-              <Link href="/jd-analyzer" className="hover:text-on-surface transition-colors">JD Blueprint Designer</Link>
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-semibold text-on-surface uppercase tracking-wider mb-1 font-code-mono">Enterprise &amp; Trust</span>
-              <Link href="/teams" className="hover:text-on-surface transition-colors">Institutional Teams OS</Link>
-              <Link href="/report" className="hover:text-on-surface transition-colors">FERPA &amp; GDPR Policies</Link>
-              <Link href="/report" className="hover:text-on-surface transition-colors">Security Whitepaper</Link>
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-semibold text-on-surface uppercase tracking-wider mb-1 font-code-mono">Platform Status</span>
-              <div className="flex items-center gap-2 text-tertiary font-code-mono">
-                <span className="w-2 h-2 rounded-full bg-tertiary" />All Services Operational
-              </div>
-              <span className="text-outline text-[11px] font-code-mono">Global Edge Latency: ~18ms</span>
-            </div>
-          </div>
-
-          <div className="pt-6 flex flex-wrap items-center justify-between gap-4 text-xs text-outline border-t border-white/[0.04]">
-            <p>© 2025–2026 PrepPilot AI &amp; Mentor Matrix Inc. All sovereign computing rights reserved.</p>
-            <div className="flex items-center gap-6">
-              <Link href="#" className="hover:text-on-surface transition-colors">Privacy Architecture</Link>
-              <Link href="#" className="hover:text-on-surface transition-colors">Security Whitepaper</Link>
-              <Link href="#" className="hover:text-on-surface transition-colors">System Telemetry</Link>
-            </div>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

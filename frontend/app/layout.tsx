@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
-import { Navbar } from "@/components/Navbar";
+import { AppHeader } from "@/components/layout/AppHeader";
+import { AppFooter } from "@/components/layout/AppFooter";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -44,8 +45,9 @@ export default function RootLayout({
         className={`${plusJakartaSans.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans min-h-screen flex flex-col bg-background text-on-surface`}
       >
         <AuthProvider>
-          <Navbar />
+          <AppHeader />
           <main className="flex-1 flex flex-col">{children}</main>
+          <AppFooter />
         </AuthProvider>
       </body>
     </html>
