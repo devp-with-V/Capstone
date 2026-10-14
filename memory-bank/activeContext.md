@@ -70,6 +70,8 @@
 5. **`/health` 404 noise is external**: no poller in the repo (grepped frontend+backend) — it's the user's own health-check tab/curl hitting the wrong path; correct is `GET /api/health`.
 6. **Verified**: `tsc` clean, `npm run build` exit 0, backend compiles.
 7. **MediaRecorder hardening (NotSupportedError fix)**: `isTypeSupported()` lies on some Chrome/Edge builds — `start()` threw on the audio mime. Answer recorder now tries `audio/webm;codecs=opus` → `audio/webm` → `audio/mp4` → browser default, and falls back to a typed-answer message instead of crashing. Session recorder got the same chain and can no longer block Start; interview proceeds even if local recording is unavailable.
+8. **Stage layout (committed `e00a417`)**: neural orb replaced with an animated SVG cartoon avatar (mouth bars dance while speaking, smile when idle); side-by-side AURA tile + user camera tile; Answer/Send controls moved above the transcript; all prior work saved to `dev` as `cffc591` first (`.env` excluded).
+9. **Supavisor prepared-statement fix**: transaction-mode pooler broke asyncpg (`DuplicatePreparedStatementError`) for both app and migrations — set `statement_cache_size=0` in `app/core/database.py` and `alembic/env.py`. Verified: `alembic current` → `20261013_ai_sessions (head)` through the pooler.
 
 ## Session 2026-10-13 — UI unification + real auth (branch `dev`, single worker + 2 subagents)
 1. **Shared Obsidian shell**: new `frontend/components/layout/AppHeader.tsx` (fixed header + microservices strip + auth-aware CTAs), `AppFooter.tsx`, `PageShell.tsx` (`PageShell` + `ObsidianCard`). `app/layout.tsx` now renders them globally; deleted shadcn `components/Navbar.tsx`.

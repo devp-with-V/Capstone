@@ -16,7 +16,14 @@ async_session_maker = None
 
 if is_valid_db_url(settings.DATABASE_URL):
     try:
-        engine = create_async_engine(settings.DATABASE_URL, echo=False)
+        # statement_cache_size=0: Supabase Supavisor runs in transaction-pool
+        # mode, which does not support prepared statements. Harmless for
+        # direct connections too, so it stays unconditional.
+        engine = create_async_engine(
+            settings.DATABASE_URL,
+            echo=False,
+            connect_args={"statement_cache_size": 0},
+        )
         async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     except Exception:
         engine = None
