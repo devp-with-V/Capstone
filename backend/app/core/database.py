@@ -1,5 +1,6 @@
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 from app.core.config import settings
 
 # Check if DATABASE_URL is configured with real credentials or a placeholder
@@ -22,6 +23,9 @@ if is_valid_db_url(settings.DATABASE_URL):
         engine = create_async_engine(
             settings.DATABASE_URL,
             echo=False,
+            # NullPool: Supavisor already pools server-side; holding client-side
+            # connections risks reusing ones stuck in a failed transaction.
+            poolclass=NullPool,
             connect_args={"statement_cache_size": 0},
         )
         async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -41,5 +45,14 @@ async def get_db() -> AsyncGenerator[AsyncSession | None, None]:
             await session.rollback()
             raise
         finally:
+            # Our routers convert exceptions into {data, error} envelopes
+            # instead of raising, so a failed transaction would otherwise be
+            # returned to the pool un-rolled-back and poison later requests
+            # ("Can't reconnect until invalid transaction is rolled back").
+            # Rollback here is a no-op after a successful commit.
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             await session.close()
 

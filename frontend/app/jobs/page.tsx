@@ -69,7 +69,7 @@ export default function JobsPage() {
 
   return (
     <div className="min-h-screen bg-background text-on-surface flex flex-col">
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-12 flex flex-col gap-8">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 pt-32 pb-12 flex flex-col gap-8">
         <div className="flex flex-col gap-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container border border-white/[0.08] w-fit">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />

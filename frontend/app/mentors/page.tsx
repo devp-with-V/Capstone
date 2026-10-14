@@ -314,7 +314,7 @@ export default function MentorsPage() {
   return (
     <div className="bg-background font-body-md text-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-primary-container selection:text-on-surface">
       {/* Main Page Body */}
-      <main className="w-full pt-28 bg-background min-h-screen flex-1">
+      <main className="w-full pt-32 bg-background min-h-screen flex-1">
         <div className="flex flex-col w-full relative overflow-hidden">
           {/* Atmospheric Glow Backdrops */}
           <div className="absolute -top-40 left-1/4 w-[420px] h-[420px] bg-secondary-container/20 rounded-full blur-[140px] pointer-events-none"></div>
