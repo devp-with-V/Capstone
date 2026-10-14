@@ -49,6 +49,52 @@ const INPUT_CLS =
   "w-full px-4 py-2.5 rounded-xl bg-surface-container-lowest border border-white/[0.08] text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary";
 const LABEL_CLS = "text-xs font-medium text-on-surface-variant";
 
+// AURA's cartoon avatar: SVG robot whose mouth dances while speaking.
+function AuraAvatar({ speaking }: { speaking: boolean }) {
+  return (
+    <div className="relative flex items-center justify-center py-1">
+      <div
+        className={`absolute w-28 h-28 rounded-full blur-2xl transition-all ${
+          speaking ? "bg-primary-container/50" : "bg-primary-container/15"
+        }`}
+      />
+      <svg viewBox="0 0 120 120" className="relative w-32 h-32">
+        <line x1="60" y1="16" x2="60" y2="30" stroke="#8083ff" strokeWidth="3" strokeLinecap="round" />
+        <circle cx="60" cy="12" r="4.5" fill={speaking ? "#4edea3" : "#8083ff"}>
+          {speaking && <animate attributeName="opacity" values="1;0.3;1" dur="0.8s" repeatCount="indefinite" />}
+        </circle>
+        <rect x="13" y="52" width="9" height="24" rx="4.5" fill="#571bc1" />
+        <rect x="98" y="52" width="9" height="24" rx="4.5" fill="#571bc1" />
+        <rect x="22" y="30" width="76" height="70" rx="22" fill="#1d1f28" stroke="#8083ff" strokeWidth="2.5" />
+        <circle cx="45" cy="58" r="7.5" fill="#c0c1ff" />
+        <circle cx="75" cy="58" r="7.5" fill="#c0c1ff" />
+        <circle cx="45" cy="58" r="3" fill="#0c0e16" />
+        <circle cx="75" cy="58" r="3" fill="#0c0e16" />
+        <circle cx="35" cy="73" r="3" fill="#d0bcff" opacity="0.45" />
+        <circle cx="85" cy="73" r="3" fill="#d0bcff" opacity="0.45" />
+        {speaking ? (
+          <g fill="#4edea3">
+            <rect x="48" y="74" width="4.5" height="12" rx="2">
+              <animate attributeName="y" values="78;70;78" dur="0.55s" repeatCount="indefinite" />
+              <animate attributeName="height" values="8;18;8" dur="0.55s" repeatCount="indefinite" />
+            </rect>
+            <rect x="55.5" y="74" width="4.5" height="12" rx="2">
+              <animate attributeName="y" values="72;80;72" dur="0.7s" repeatCount="indefinite" />
+              <animate attributeName="height" values="16;8;16" dur="0.7s" repeatCount="indefinite" />
+            </rect>
+            <rect x="63" y="74" width="4.5" height="12" rx="2">
+              <animate attributeName="y" values="78;70;78" dur="0.62s" repeatCount="indefinite" />
+              <animate attributeName="height" values="8;18;8" dur="0.62s" repeatCount="indefinite" />
+            </rect>
+          </g>
+        ) : (
+          <path d="M48 77 Q60 87 72 77" stroke="#4edea3" strokeWidth="3" fill="none" strokeLinecap="round" />
+        )}
+      </svg>
+    </div>
+  );
+}
+
 function MockInterviewContent() {
   const router = useRouter();
 
@@ -1054,50 +1100,66 @@ function MockInterviewContent() {
                   </div>
                 </div>
 
-                {/* Central Neural Orb & Waveform */}
-                <div className="my-4 flex flex-col items-center justify-center relative z-10 py-2">
-                  <div className="relative flex items-center justify-center mb-4">
-                    <div
-                      className="w-20 h-20 rounded-full bg-gradient-to-tr from-secondary-container via-primary-container to-tertiary-container p-0.5 shadow-xl shadow-primary-container/20 animate-spin"
-                      style={{ animationDuration: "12s" }}
+                {/* Interview Stage: AURA cartoon + you, side by side */}
+                <div className="my-4 grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
+                  {/* AURA cartoon tile */}
+                  <div className="rounded-2xl bg-surface-container-lowest border border-primary/25 p-4 flex flex-col items-center gap-1 overflow-hidden">
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full font-code-mono text-[10px] font-bold uppercase tracking-wider border ${
+                        speakingId
+                          ? "bg-primary-container/20 text-primary border-primary/40"
+                          : "bg-surface-container-high text-on-surface-variant border-white/[0.08]"
+                      }`}
                     >
-                      <div className="w-full h-full bg-surface-container-lowest rounded-full flex items-center justify-center">
-                        <span className="material-symbols-outlined text-primary text-[32px]">neurology</span>
+                      {speakingId ? "● AURA speaking…" : "AURA • AI Interviewer"}
+                    </span>
+                    <AuraAvatar speaking={speakingId !== null} />
+                    <span className="text-[11px] text-on-surface-variant text-center leading-snug min-h-8">
+                      {questions[qIndex]
+                        ? `Q${qIndex + 1}/${questions.length}: ${questions[qIndex].slice(0, 90)}${questions[qIndex].length > 90 ? "…" : ""}`
+                        : "Preparing your questions…"}
+                    </span>
+                    {questions[qIndex] && (
+                      <button
+                        onClick={() => speak(questions[qIndex])}
+                        className="mt-1 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-high text-[11px] font-semibold text-primary hover:bg-surface-bright border border-primary/25 transition-all"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">replay</span>
+                        Replay question
+                      </button>
+                    )}
+                  </div>
+                  {/* You camera tile */}
+                  <div className="rounded-2xl bg-surface-container-lowest border border-white/[0.08] overflow-hidden flex flex-col">
+                    <div className="relative bg-black flex-1 min-h-40">
+                      <video
+                        ref={liveVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                      <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 border border-error/40">
+                        <span className="w-2 h-2 rounded-full bg-error animate-ping" />
+                        <span className="font-code-mono text-[10px] font-bold text-error uppercase tracking-wider">
+                          Recording
+                        </span>
+                      </div>
+                      <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 font-code-mono text-[10px] text-on-surface">
+                        You • {formatTimer(elapsedSeconds)}
                       </div>
                     </div>
-                    <div className="absolute inset-0 rounded-full bg-primary/20 blur-md -z-10 scale-125" />
-                  </div>
-
-                  {/* Waveform Equalizer */}
-                  <div className="w-full max-w-md flex items-center justify-center gap-1.5 h-14 px-4">
-                    <span className="w-1.5 bg-secondary rounded-full animate-bounce h-5 [animation-delay:0.1s]" />
-                    <span className="w-1.5 bg-primary rounded-full animate-bounce h-9 [animation-delay:0.25s]" />
-                    <span className="w-1.5 bg-tertiary rounded-full animate-bounce h-12 [animation-delay:0.05s]" />
-                    <span className="w-1.5 bg-secondary rounded-full animate-bounce h-7 [animation-delay:0.3s]" />
-                    <span className="w-1.5 bg-primary-container rounded-full animate-bounce h-14 [animation-delay:0.15s]" />
-                    <span className="w-1.5 bg-tertiary-fixed rounded-full animate-bounce h-10 [animation-delay:0.4s]" />
-                    <span className="w-1.5 bg-secondary-fixed rounded-full animate-bounce h-6 [animation-delay:0.2s]" />
-                    <span className="w-1.5 bg-primary rounded-full animate-bounce h-12 [animation-delay:0.35s]" />
-                    <span className="w-1.5 bg-tertiary rounded-full animate-bounce h-8 [animation-delay:0.1s]" />
-                    <span className="w-1.5 bg-secondary rounded-full animate-bounce h-14 [animation-delay:0.22s]" />
-                    <span className="w-1.5 bg-primary-container rounded-full animate-bounce h-5 [animation-delay:0.45s]" />
-                    <span className="w-1.5 bg-tertiary-fixed rounded-full animate-bounce h-10 [animation-delay:0.18s]" />
-                    <span className="w-1.5 bg-secondary rounded-full animate-bounce h-4 [animation-delay:0.32s]" />
-                  </div>
-
-                  <div className="mt-2 flex items-center gap-2 font-code-mono text-xs text-primary">
-                    <span
-                      className={`inline-block w-2 h-2 rounded-full ${
-                        speakingId ? "bg-primary animate-ping" : "bg-tertiary"
-                      }`}
-                    />
-                    <span className="font-semibold">
-                      {speakingId
-                        ? "AURA IS SPEAKING — LISTEN IN…"
-                        : `CHALLENGE STATE: QUESTION ${qIndex + 1} OF ${questions.length || questionCount}`}
-                    </span>
+                    <div className="px-4 py-2.5 flex items-center justify-between border-t border-white/[0.05]">
+                      <span className="font-code-mono text-[11px] text-outline uppercase tracking-wider">
+                        Capture → this device
+                      </span>
+                      <span className="font-code-mono text-[11px] text-tertiary">
+                        {turnCount} answer{turnCount === 1 ? "" : "s"} saved
+                      </span>
+                    </div>
                   </div>
                 </div>
+
 
                 <div className="flex items-center justify-between z-10 w-full pt-1 text-on-surface-variant text-xs border-t border-white/[0.04]">
                   <span>Mode: Interactive Dynamic Voice Sync</span>
@@ -1108,65 +1170,8 @@ function MockInterviewContent() {
                 </div>
               </div>
 
-              {/* Real-Time Dialogue Stream Card */}
+              {/* Answer Controls (moved up by the stage) */}
               <div className="w-full bg-surface-container rounded-2xl p-6 border border-white/[0.08] shadow-lg flex flex-col gap-4">
-                {/* Dialogue Container */}
-                <div className="flex flex-col gap-3.5 overflow-y-auto max-h-[380px] pr-1 scrollbar-none" id="dialogue-container">
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex flex-col gap-2 p-4 rounded-xl border shadow-sm ${
-                        msg.sender === "ai"
-                          ? "bg-surface-container-low border-white/[0.05]"
-                          : "bg-surface-container-high border-white/[0.08]"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`text-xs font-semibold flex items-center gap-1.5 ${
-                            msg.sender === "ai" ? "text-secondary" : "text-primary"
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[16px]">
-                            {msg.sender === "ai" ? "smart_toy" : "account_circle"}
-                          </span>
-                          {msg.senderName}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          {msg.sender === "ai" && !msg.isStreaming && !msg.isBlueprint && (
-                            <button
-                              onClick={() => speak(msg.content, msg.id)}
-                              className="p-1 rounded-lg text-outline hover:text-primary hover:bg-surface-container-high transition-all"
-                              title="Replay aloud"
-                            >
-                              <span
-                                className={`material-symbols-outlined text-[16px] ${
-                                  speakingId === msg.id ? "animate-pulse text-primary" : ""
-                                }`}
-                              >
-                                {speakingId === msg.id ? "volume_up" : "replay"}
-                              </span>
-                            </button>
-                          )}
-                          {msg.isStreaming && (
-                            <span className="px-2 py-0.5 rounded bg-surface-container text-tertiary font-code-mono text-[10px] border border-tertiary/20">
-                              Streaming
-                            </span>
-                          )}
-                          <span className="font-code-mono text-xs text-outline">{msg.timestamp}</span>
-                        </div>
-                      </div>
-                      {msg.isBlueprint ? (
-                        <pre className="font-code-mono text-xs text-primary bg-surface-container-lowest p-3 rounded-lg border border-white/[0.05] overflow-x-auto whitespace-pre">
-                          {msg.content}
-                        </pre>
-                      ) : (
-                        <p className="text-xs sm:text-sm text-on-surface leading-relaxed">{msg.content}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
                 {/* Candidate Typed Response Input (Sync with Voice) */}
                 {answerError && (
                   <div className="p-3 rounded-xl bg-error-container/20 border border-error/30 text-error text-xs">
@@ -1294,39 +1299,71 @@ function MockInterviewContent() {
                   <span className="text-xs font-code-mono text-outline">Auto-recalibration: 05:42</span>
                 </div>
               </div>
+
+              {/* Transcript */}
+              <div className="w-full bg-surface-container rounded-2xl p-6 border border-white/[0.08] shadow-lg flex flex-col gap-4">
+                {/* Dialogue Container */}
+                <div className="flex flex-col gap-3.5 overflow-y-auto max-h-[380px] pr-1 scrollbar-none" id="dialogue-container">
+                  {messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col gap-2 p-4 rounded-xl border shadow-sm ${
+                        msg.sender === "ai"
+                          ? "bg-surface-container-low border-white/[0.05]"
+                          : "bg-surface-container-high border-white/[0.08]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`text-xs font-semibold flex items-center gap-1.5 ${
+                            msg.sender === "ai" ? "text-secondary" : "text-primary"
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[16px]">
+                            {msg.sender === "ai" ? "smart_toy" : "account_circle"}
+                          </span>
+                          {msg.senderName}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {msg.sender === "ai" && !msg.isStreaming && !msg.isBlueprint && (
+                            <button
+                              onClick={() => speak(msg.content, msg.id)}
+                              className="p-1 rounded-lg text-outline hover:text-primary hover:bg-surface-container-high transition-all"
+                              title="Replay aloud"
+                            >
+                              <span
+                                className={`material-symbols-outlined text-[16px] ${
+                                  speakingId === msg.id ? "animate-pulse text-primary" : ""
+                                }`}
+                              >
+                                {speakingId === msg.id ? "volume_up" : "replay"}
+                              </span>
+                            </button>
+                          )}
+                          {msg.isStreaming && (
+                            <span className="px-2 py-0.5 rounded bg-surface-container text-tertiary font-code-mono text-[10px] border border-tertiary/20">
+                              Streaming
+                            </span>
+                          )}
+                          <span className="font-code-mono text-xs text-outline">{msg.timestamp}</span>
+                        </div>
+                      </div>
+                      {msg.isBlueprint ? (
+                        <pre className="font-code-mono text-xs text-primary bg-surface-container-lowest p-3 rounded-lg border border-white/[0.05] overflow-x-auto whitespace-pre">
+                          {msg.content}
+                        </pre>
+                      ) : (
+                        <p className="text-xs sm:text-sm text-on-surface leading-relaxed">{msg.content}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+              </div>
             </div>
 
             {/* Right 4 Columns */}
             <div className="lg:col-span-4 flex flex-col gap-6">
-              {/* Live Camera Preview (mandatory recording) */}
-              <div className="w-full bg-surface-container rounded-2xl overflow-hidden border border-white/[0.08] shadow-lg">
-                <div className="relative bg-black">
-                  <video
-                    ref={liveVideoRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="w-full h-52 object-cover"
-                  />
-                  <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 border border-error/40">
-                    <span className="w-2 h-2 rounded-full bg-error animate-ping" />
-                    <span className="font-code-mono text-[10px] font-bold text-error uppercase tracking-wider">
-                      Recording
-                    </span>
-                  </div>
-                  <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 font-code-mono text-[10px] text-on-surface">
-                    You • {formatTimer(elapsedSeconds)}
-                  </div>
-                </div>
-                <div className="px-4 py-2.5 flex items-center justify-between border-t border-white/[0.05]">
-                  <span className="font-code-mono text-[11px] text-outline uppercase tracking-wider">
-                    Session capture → this device
-                  </span>
-                  <span className="font-code-mono text-[11px] text-tertiary">
-                    {turnCount} answer{turnCount === 1 ? "" : "s"} saved
-                  </span>
-                </div>
-              </div>
               {/* Live Rubric Telemetry Card */}
               <div className="w-full bg-surface-container rounded-2xl p-6 border border-white/[0.08] shadow-lg flex flex-col gap-4">
                 <div className="flex items-center justify-between">
